@@ -1,15 +1,21 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import html2canvas from 'html2canvas'
 import PrebuiltLogosGrid from '../components/PrebuiltLogosGrid.jsx'
 import IconsDropdown from '../components/IconsDropdown.jsx'
 import PREBUILT_LOGO_TEMPLATES from '../data/logoTemplates.js'
 import EMOJI_ICONS from '../data/emojiIcons.js'
 import { loadEmojis } from '../utils/emojiLoader.js'
+import { mapTypographyToFont, guessLayoutTemplate, guessShape } from '../utils/aiMappers.js'
 import FontSelectDropdown from '../components/FontSelectDropdown.jsx'
 import ColorPalettesDropdown from '../components/ColorPalettesDropdown.jsx'
 import ShapesDropdown from '../components/ShapesDropdown.jsx'
 import LayoutTemplatesDropdown from '../components/LayoutTemplatesDropdown.jsx'
 import StylesDropdown from '../components/StylesDropdown.jsx'
+import { postJson } from '../utils/api.js'
+import ExampleLogosDropdown from '../components/ExampleLogosDropdown.jsx'
+import LogoRendererSVG from '../renderers/LogoRendererSVG.jsx'
+import EXAMPLE_TEMPLATES from '../data/logoExampleTemplates.jsx'
+import { buildLogoRequestFromState } from '../types/logoSchema.js'
 
 const LogoCreator = () => {
   const [logoData, setLogoData] = useState({
@@ -32,6 +38,8 @@ const LogoCreator = () => {
 
   const [aiSuggestions, setAiSuggestions] = useState([])
   const [isGenerating, setIsGenerating] = useState(false)
+  const [exampleTemplateId, setExampleTemplateId] = useState('')
+  const svgRef = useRef(null)
 
   const styles = [
     { id: 'modern', name: 'Modern', icon: '🎯' },
@@ -57,6 +65,65 @@ const LogoCreator = () => {
       setIcons(big)
       setIconsLoaded(true)
     }
+
+  }
+
+  const autoStyleWithAI = async () => {
+    if (!logoData.companyName) {
+      alert('Please enter a company name to auto-style with AI')
+      return
+    }
+    setIsGenerating(true)
+    try {
+      const req = buildLogoRequestFromState({
+        companyName: logoData.companyName,
+        industry: logoData.industry,
+        initials: logoData.initials,
+        tagline: logoData.tagline,
+        primaryColor: design.primaryColor,
+        secondaryColor: design.secondaryColor,
+        selectedExampleTemplateId: exampleTemplateId,
+        selectedFont: design.font
+      })
+      const { ok, status, data, text } = await postJson('/api/generate-logo-design', req)
+      if (!ok) {
+        const msg = (data && (data.error || data.message)) || text || `HTTP ${status}`
+        throw new Error(msg)
+      }
+      const payload = data || {}
+      const suggestion = (payload.designs && payload.designs[0]) || null
+      if (!suggestion) throw new Error('No AI suggestion returned')
+
+      const primary = suggestion.colors?.primary || suggestion.primaryColor || design.primaryColor
+      const secondary = suggestion.colors?.secondary || suggestion?.gradient?.stops?.[1]?.color || design.secondaryColor || primary
+      const font = mapTypographyToFont(suggestion.typography?.font || suggestion.typography)
+      const tplFromAI = suggestion.layout?.template
+      const tpl = guessLayoutTemplate(suggestion, logoData)
+      const shp = guessShape(logoData)
+
+      setDesign(prev => ({
+        ...prev,
+        style: suggestion.style || prev.style,
+        icon: suggestion.icon?.emoji || suggestion.icon || prev.icon,
+        primaryColor: primary,
+        secondaryColor: secondary,
+        font,
+        layoutTemplate: tplFromAI || tpl,
+        shape: shp
+      }))
+      // Switch to a specific SVG template if AI suggested one
+      if (tplFromAI) {
+        setExampleTemplateId(tplFromAI)
+      } else {
+        // default to procedural unique icon
+        setExampleTemplateId('abstract-duotone-procedural')
+      }
+    } catch (e) {
+      console.error('Auto-style failed:', e)
+      alert(`Auto-style failed: ${e.message || e}`)
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   const colors = [
@@ -64,7 +131,7 @@ const LogoCreator = () => {
     '#8b5cf6', '#06b6d4', '#84cc16', '#f97316'
   ]
 
-  const showLogoIcon = false
+  const showLogoIcon = true
 
   const generateAILogo = async () => {
     if (!logoData.companyName) {
@@ -75,19 +142,25 @@ const LogoCreator = () => {
     setIsGenerating(true)
     
     try {
-      const response = await fetch('/api/generate-logo-design', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(logoData)
+      const req = buildLogoRequestFromState({
+        companyName: logoData.companyName,
+        industry: logoData.industry,
+        initials: logoData.initials,
+        tagline: logoData.tagline,
+        primaryColor: design.primaryColor,
+        secondaryColor: design.secondaryColor,
+        selectedExampleTemplateId: exampleTemplateId,
+        selectedFont: design.font
       })
-
-      const suggestions = await response.json()
-      setAiSuggestions(suggestions.designs || [])
+      const { ok, status, data, text } = await postJson('/api/generate-logo-design', req)
+      if (!ok) {
+        const msg = (data && (data.error || data.message)) || text || `HTTP ${status}`
+        throw new Error(msg)
+      }
+      setAiSuggestions((data && data.designs) || [])
     } catch (error) {
       console.error('Error generating AI logo:', error)
-      alert('Error generating AI logo. Please try again.')
+      alert(`Error generating AI logo: ${error.message || error}`)
     } finally {
       setIsGenerating(false)
     }
@@ -107,8 +180,23 @@ const LogoCreator = () => {
       link.href = canvas.toDataURL('image/png')
       link.click()
     } else if (format === 'svg') {
-      // SVG export would need additional implementation
-      alert('SVG export coming soon!')
+      // If an example template is selected, export the SVG from the renderer
+      const selected = EXAMPLE_TEMPLATES.find(t => t.id === exampleTemplateId)
+      if (selected && svgRef.current) {
+        const serializer = new XMLSerializer()
+        const svgString = serializer.serializeToString(svgRef.current)
+        const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `logo-${logoData.companyName || 'brand'}.svg`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      } else {
+        alert('Select an example SVG template to export as SVG.')
+      }
     }
   }
 
@@ -211,7 +299,7 @@ const LogoCreator = () => {
       <div className="creator-leftbar animate-fade-up animate-delay-1">
         <h3>Design Tools</h3>
 
-        <div style={{ marginBottom: 'var(--spacing-6)' }}>
+        <div style={{ marginBottom: 'var(--spacing-6)', display: 'grid', gap: '8px' }}>
           <button 
             onClick={generateAILogo} 
             className="btn btn-primary" 
@@ -220,11 +308,24 @@ const LogoCreator = () => {
           >
             {isGenerating ? '🤖 Generating...' : '✨ Generate AI Logo'}
           </button>
+          <button 
+            onClick={autoStyleWithAI} 
+            className="btn btn-secondary" 
+            style={{ width: '100%' }}
+            disabled={isGenerating}
+          >
+            {isGenerating ? '🎛️ Applying...' : '🎛️ Auto Style with AI'}
+          </button>
         </div>
 
         <StylesDropdown
           value={design.style}
           onChange={(val) => handleDesignChange('style', val)}
+        />
+
+        <ExampleLogosDropdown
+          value={exampleTemplateId}
+          onChange={(id) => setExampleTemplateId(id)}
         />
 
         <IconsDropdown
@@ -294,7 +395,20 @@ const LogoCreator = () => {
           <h2>Logo Preview</h2>
           <div className="logo-preview" id="logo-preview">
             <div style={{ textAlign: 'center' }}>
-              {(() => {
+              {exampleTemplateId ? (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                  <LogoRendererSVG
+                    ref={svgRef}
+                    template={EXAMPLE_TEMPLATES.find(t => t.id === exampleTemplateId)}
+                    companyName={logoData.companyName}
+                    initials={logoData.initials}
+                    primaryColor={design.primaryColor}
+                    secondaryColor={design.secondaryColor}
+                    font={design.font}
+                  />
+                </div>
+              ) : (
+              (() => {
                 const title = (
                   <div style={{ ...getLogoStyle(), fontSize: '1.5rem', fontWeight: '600' }}>
                     {logoData.companyName || 'Company Name'}
@@ -307,7 +421,7 @@ const LogoCreator = () => {
                 ) : null
 
                 const iconEl = showLogoIcon ? (
-                  <div style={{ fontSize: '2rem' }}>{design.icon}</div>
+                  <div style={{ fontSize: '2.5rem' }}>{design.icon}</div>
                 ) : null
 
                 const shapeEl = getShapeBox()
@@ -363,7 +477,8 @@ const LogoCreator = () => {
                       </div>
                     )
                 }
-              })()}
+              })()
+              )}
             </div>
           </div>
 
@@ -377,14 +492,6 @@ const LogoCreator = () => {
           </div>
         </div>
 
-        {/* Prebuilt professional logo cards */}
-        <PrebuiltLogosGrid 
-          templates={PREBUILT_LOGO_TEMPLATES}
-          onApply={applyPrebuiltTemplate}
-        />
-
-        {/* Additional icon pickers can be added here if needed */}
-
         {aiSuggestions.length > 0 && (
           <div>
             <h3>AI Generated Logo Suggestions</h3>
@@ -395,15 +502,19 @@ const LogoCreator = () => {
                   className="suggestion-card"
                   onClick={() => {
                     handleDesignChange('style', suggestion.style)
-                    handleDesignChange('icon', suggestion.icon)
-                    handleDesignChange('primaryColor', suggestion.primaryColor)
-                    const sec = suggestion?.gradient?.stops?.[1]?.color
-                    if (sec) handleDesignChange('secondaryColor', sec)
+                    handleDesignChange('icon', suggestion.icon?.emoji || suggestion.icon)
+                    const primary = suggestion.colors?.primary || suggestion.primaryColor
+                    const secondary = suggestion.colors?.secondary || suggestion?.gradient?.stops?.[1]?.color
+                    if (primary) handleDesignChange('primaryColor', primary)
+                    if (secondary) handleDesignChange('secondaryColor', secondary)
+                    const font = suggestion.typography?.font
+                    if (font) handleDesignChange('font', mapTypographyToFont(font))
+                    if (suggestion.layout?.template) setExampleTemplateId(suggestion.layout.template)
                   }}
                 >
                   <div style={{ padding: 'var(--spacing-2)', fontSize: '0.75rem', textAlign: 'center' }}>
                     <div style={{ fontSize: '1.5rem', marginBottom: 'var(--spacing-1)' }}>
-                      {suggestion.icon}
+                      {suggestion.icon?.emoji || suggestion.icon}
                     </div>
                     <div>{suggestion.name}</div>
                   </div>
@@ -412,6 +523,16 @@ const LogoCreator = () => {
             </div>
           </div>
         )}
+
+        {/* Prebuilt professional logo cards moved below AI suggestions */}
+        <div style={{ marginTop: 'var(--spacing-6)' }}>
+          <PrebuiltLogosGrid 
+            templates={PREBUILT_LOGO_TEMPLATES}
+            onApply={applyPrebuiltTemplate}
+          />
+        </div>
+
+        {/* Additional icon pickers can be added here if needed */}
       </div>
 
       <div className="creator-sidebar animate-fade-up animate-delay-3">

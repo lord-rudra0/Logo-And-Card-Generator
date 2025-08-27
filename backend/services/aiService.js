@@ -114,48 +114,69 @@ Return ONLY the JSON array.`
 export async function generateLogoDesign(genAI, logoData) {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-    
+
+    const inputJson = JSON.stringify(logoData, null, 2)
     const prompt = `
-You are a senior logo designer. Generate EXACTLY 6 professional logo concepts.
+You are a senior logo designer. Generate EXACTLY 6 professional logo concepts as JSON only.
 
-Brand input:
-- Company: ${logoData.companyName}
-- Industry: ${logoData.industry}
-- Initials: ${logoData.initials || 'N/A'}
-- Tagline: ${logoData.tagline || 'N/A'}
+Client input (schema fields may include colors, gradient, icon, layout, typography):
+${inputJson}
 
-Style direction:
-- Prefer bright, high-contrast, modern looks with vivid gradients (neon, duotone, or gold-on-dark where suitable).
-- Ensure strong legibility on dark and light backgrounds.
-- Use clean geometric shapes and minimal details for scalability.
+Guidance:
+- Favor modern, high-contrast, scalable vector shapes. Avoid clutter.
+- If client provided preferences (colors/gradient/font/layout/template/icon family), respect them but improve them.
+- Ensure text remains legible on both light and dark backgrounds.
 
-Output: Return ONLY a JSON array (no prose) of 6 objects. Each object MUST include:
+Output JSON ARRAY ONLY (no prose/backticks). EXACTLY 6 objects. Schema:
 {
   "name": string,
   "style": "modern"|"minimalist"|"corporate"|"creative"|"tech"|"vintage",
-  "primaryColor": string,            // hex
-  "gradient": {                      // optional but recommended
-    "type": "linear"|"radial",
-    "angle": number,                // degrees for linear
-    "stops": [ { "color": string, "at": number } ] // 0..100
+  "colors": {
+    "primary": string,               // hex
+    "secondary": string,             // hex
+    "background": string,            // hex or 'transparent'
+    "gradient": {
+      "enabled": boolean,
+      "type": "linear"|"radial",
+      "angle": number,
+      "stops": [ { "color": string, "at": number } ]
+    }
   },
-  "icon": string,                   // emoji or short symbol hint
-  "typography": string,            // Google-safe font name
-  "description": string            // 1 sentence rationale
+  "icon": {
+    "emoji": string,                 // optional quick preview symbol
+    "family": "abstract"|"monogram"|"geometric"|"leaf"|"shield"|"link"|"orbit"|"chevron",
+    "strokeWidth": number,
+    "cornerRadius": number,
+    "symmetry": "none"|"radial"|"bilateral"|"grid",
+    "rotation": number,
+    "complexity": "minimal"|"medium"|"rich"
+  },
+  "typography": {
+    "font": string,                  // Google-safe or system-safe
+    "weight": number,
+    "letterSpacing": number
+  },
+  "layout": {
+    "template": string,              // e.g. 'abstract-duotone-procedural', 'icon-above', etc.
+    "spacing": "tight"|"regular"|"roomy",
+    "alignment": "left"|"center"|"right",
+    "iconPlacement": "top"|"left"|"right"|"center-only"
+  },
+  "description": string
 }
 
-Diversity: vary colorways (cool/warm/neon/gold), gradient angles, and styles.
+Diversity: vary colorways, gradient angles, templates, icon families, and fonts across the 6 items.
 `
 
     const result = await model.generateContent(prompt)
     const response = await result.response
     const text = response.text()
-    
+
     let designs = []
     try {
-      const jsonMatch = text.match(/\[[\s\S]*\]/)
-      if (jsonMatch) {
-        designs = JSON.parse(jsonMatch[0])
+      const extracted = extractJsonArray(text)
+      if (extracted) {
+        designs = extracted
       } else {
         designs = createFallbackLogoDesigns(logoData)
       }
