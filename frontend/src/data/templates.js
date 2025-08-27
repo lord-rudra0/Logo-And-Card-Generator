@@ -39,54 +39,12 @@ function pick(arr, i) { return arr[i % arr.length] }
 function pickShifted(arr, i, shift) { return arr[(i + shift) % arr.length] }
 
 function makeLayout(i) {
-  // Curated, professional text arrangements inspired by common business card patterns
-  const PRESETS = [
-    // 1. Company top-left, name center-left, title under name, contacts bottom-left
-    { company: 'top left', name: 'center left', title: 'center left', contacts: 'bottom left', offs: { company: {x:0,y:0}, name:{x:0,y:-6}, title:{x:0,y:16}, contacts:{x:0,y:0} } },
-    // 2. Company top-right, name center-right, contacts bottom-right
-    { company: 'top right', name: 'center right', title: 'center right', contacts: 'bottom right', offs: { company:{x:-8,y:0}, name:{x:0,y:-8}, title:{x:0,y:12}, contacts:{x:0,y:0} } },
-    // 3. Company top-center, name center, contacts bottom-center
-    { company: 'top center', name: 'center', title: 'center', contacts: 'bottom center', offs: { company:{x:0,y:0}, name:{x:0,y:-10}, title:{x:0,y:12}, contacts:{x:0,y:0} } },
-    // 4. Split: company left, name right, contacts bottom-right
-    { company: 'top left', name: 'center right', title: 'center right', contacts: 'bottom right', offs: { company:{x:0,y:0}, name:{x:-8,y:0}, title:{x:-8,y:16}, contacts:{x:0,y:0} } },
-    // 5. Split: company right, name left, contacts bottom-left
-    { company: 'top right', name: 'center left', title: 'center left', contacts: 'bottom left', offs: { company:{x:0,y:0}, name:{x:8,y:0}, title:{x:8,y:16}, contacts:{x:0,y:0} } },
-    // 6. Diagonal emphasis: company bottom-left, name top-right
-    { company: 'bottom left', name: 'top right', title: 'center right', contacts: 'bottom right', offs: { company:{x:0,y:-6}, name:{x:-8,y:0}, title:{x:-8,y:12}, contacts:{x:0,y:0} } },
-    // 7. Minimal center-left stack
-    { company: 'center left', name: 'top left', title: 'center left', contacts: 'bottom left', offs: { company:{x:0,y:0}, name:{x:0,y:8}, title:{x:0,y:22}, contacts:{x:0,y:0} } },
-    // 8. Minimal center-right stack
-    { company: 'center right', name: 'top right', title: 'center right', contacts: 'bottom right', offs: { company:{x:0,y:0}, name:{x:0,y:8}, title:{x:0,y:22}, contacts:{x:0,y:0} } },
-    // 9. Company bottom-center, name top-center (bold center composition)
-    { company: 'bottom center', name: 'top center', title: 'center', contacts: 'bottom center', offs: { company:{x:0,y:0}, name:{x:0,y:6}, title:{x:0,y:20}, contacts:{x:0,y:0} } },
-    // 10. Name large at top-left, company center-right
-    { company: 'center right', name: 'top left', title: 'center left', contacts: 'bottom left', offs: { company:{x:0,y:-4}, name:{x:0,y:0}, title:{x:0,y:18}, contacts:{x:0,y:0} } },
-    // 11. Name large at top-right, company center-left
-    { company: 'center left', name: 'top right', title: 'center right', contacts: 'bottom right', offs: { company:{x:0,y:-4}, name:{x:0,y:0}, title:{x:0,y:18}, contacts:{x:0,y:0} } },
-    // 12. Name center, company top-left, contacts bottom-right
-    { company: 'top left', name: 'center', title: 'center', contacts: 'bottom right', offs: { company:{x:0,y:0}, name:{x:0,y:-6}, title:{x:0,y:16}, contacts:{x:0,y:0} } },
-    // 13. Contacts column on right
-    { company: 'top left', name: 'center left', title: 'center left', contacts: 'center right', offs: { company:{x:0,y:0}, name:{x:0,y:-8}, title:{x:0,y:10}, contacts:{x:12,y:0} } },
-    // 14. Big name bottom-left, company top-right
-    { company: 'top right', name: 'bottom left', title: 'bottom left', contacts: 'bottom right', offs: { company:{x:-6,y:0}, name:{x:0,y:-10}, title:{x:0,y:10}, contacts:{x:0,y:0} } },
-    // 15. Vertical company badge (simulated by left-center, shifted up)
-    { company: 'center left', name: 'top center', title: 'center', contacts: 'bottom right', offs: { company:{x:-6,y:-30}, name:{x:0,y:0}, title:{x:0,y:18}, contacts:{x:0,y:0} } },
-  ]
-
-  const p = PRESETS[i % PRESETS.length]
-  const sizeFor = {
-    name: (i % 4 === 0) ? 'x-large' : 'large',
-    title: (i % 3 === 0) ? 'medium' : 'small',
-    company: (i % 5 === 0) ? 'large' : 'medium',
-    contacts: 'small'
-  }
-
   return {
     elements: {
-      company: { position: p.company, size: sizeFor.company, offsetX: p.offs.company.x, offsetY: p.offs.company.y },
-      name: { position: p.name, size: sizeFor.name, offsetX: p.offs.name.x, offsetY: p.offs.name.y },
-      title: { position: p.title, size: sizeFor.title, offsetX: p.offs.title.x, offsetY: p.offs.title.y },
-      contacts: { position: p.contacts, size: sizeFor.contacts, offsetX: p.offs.contacts.x, offsetY: p.offs.contacts.y }
+      company: { position: pick(POSITIONS, i * 3 + 0), size: i % 5 === 0 ? 'large' : 'medium' },
+      name: { position: pick(POSITIONS, i * 5 + 1), size: (i % 4 === 0) ? 'x-large' : 'large' },
+      title: { position: pick(POSITIONS, i * 7 + 2), size: (i % 3 === 0) ? 'medium' : 'small' },
+      contacts: { position: pick(POSITIONS, i * 11 + 3), size: 'small' }
     }
   }
 }

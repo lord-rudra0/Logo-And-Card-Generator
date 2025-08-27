@@ -235,21 +235,9 @@ function MiniCardPreview({ suggestion }) {
   const titleMeta = elements.title || {}
   const companyMeta = elements.company || {}
 
-  // Support absolute percentage positioning and per-element pixel offsets
-  const withOffsetsMini = (pt, meta) => ({
-    x: Math.round((pt.x || 0) + (meta.offsetX || 0)),
-    y: Math.round((pt.y || 0) + (meta.offsetY || 0))
-  })
-  const fromMetaMini = (meta, fallback) => {
-    if (typeof meta?.xPct === 'number' && typeof meta?.yPct === 'number') {
-      return { x: Math.round(meta.xPct * W), y: Math.round(meta.yPct * H) }
-    }
-    return positionToCoordsMini(meta?.position || fallback)
-  }
-
-  const namePos = withOffsetsMini(fromMetaMini(nameMeta, 'center left'), nameMeta)
-  const titlePos = withOffsetsMini(fromMetaMini(titleMeta, 'center left'), titleMeta)
-  const companyPos = withOffsetsMini(fromMetaMini(companyMeta, 'top left'), companyMeta)
+  const namePos = positionToCoordsMini(nameMeta.position)
+  const titlePos = positionToCoordsMini(titleMeta.position)
+  const companyPos = positionToCoordsMini(companyMeta.position)
 
   const sample = normalized?.content || {}
 
@@ -260,10 +248,10 @@ function MiniCardPreview({ suggestion }) {
       <div style={{ position: 'absolute', left: companyPos.x, top: companyPos.y, fontSize: sizeToPxMini('company', companyMeta.size), opacity: 0.95 }}>
         {sample.company || 'Company'}
       </div>
-      <div style={{ position: 'absolute', left: namePos.x, top: namePos.y, fontWeight: 600, fontSize: sizeToPxMini('name', nameMeta.size) }}>
+      <div style={{ position: 'absolute', left: namePos.x, top: namePos.y + 20, fontWeight: 600, fontSize: sizeToPxMini('name', nameMeta.size) }}>
         {sample.name || 'Your Name'}
       </div>
-      <div style={{ position: 'absolute', left: titlePos.x, top: titlePos.y, fontSize: sizeToPxMini('title', titleMeta.size), opacity: 0.9 }}>
+      <div style={{ position: 'absolute', left: titlePos.x, top: titlePos.y + 44, fontSize: sizeToPxMini('title', titleMeta.size), opacity: 0.9 }}>
         {sample.title || 'Title'}
       </div>
     </div>
@@ -292,8 +280,6 @@ const CardCreator = () => {
   })
 
   const [aiSuggestions, setAiSuggestions] = useState([])
-  // Custom templates stored locally
-  const [customTemplates, setCustomTemplates] = useState([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationMode, setGenerationMode] = useState('svg') // 'svg' | 'png'
 
@@ -745,18 +731,11 @@ const deleteSelectedImage = () => {
       setTitleSize(titlePx)
       setCompanySize(companyPx)
 
-      const withOffsets = (pt, meta) => ({ x: Math.round((pt.x || 0) + (meta.offsetX || 0)), y: Math.round((pt.y || 0) + (meta.offsetY || 0)) })
-      const fromMeta = (meta, fallback) => {
-        if (typeof meta.xPct === 'number' && typeof meta.yPct === 'number') {
-          return { x: Math.round(meta.xPct * cardWidth), y: Math.round(meta.yPct * cardHeight) }
-        }
-        return positionToCoords(meta.position || fallback)
-      }
       const newPositions = { ...positions }
-      if (nameMeta) newPositions.name = withOffsets(fromMeta(nameMeta, 'center left'), nameMeta)
-      if (titleMeta) newPositions.title = withOffsets(fromMeta(titleMeta, 'center left'), titleMeta)
-      if (companyMeta) newPositions.company = withOffsets(fromMeta(companyMeta, 'top left'), companyMeta)
-      if (contactsMeta) newPositions.contacts = withOffsets(fromMeta(contactsMeta, 'bottom left'), contactsMeta)
+      if (nameMeta.position) newPositions.name = positionToCoords(nameMeta.position)
+      if (titleMeta.position) newPositions.title = positionToCoords(titleMeta.position)
+      if (companyMeta.position) newPositions.company = positionToCoords(companyMeta.position)
+      if (contactsMeta.position) newPositions.contacts = positionToCoords(contactsMeta.position)
       setPositions(newPositions)
     }
   }
@@ -1502,17 +1481,19 @@ const deleteSelectedImage = () => {
               📄 Export PDF
             </button>
           </div>
-          {/* Selected Logo controls placed under export buttons */}
-          <div style={{ marginTop: 'var(--spacing-4)' }}>
-            <h4>Selected Logo</h4>
-            {(() => {
-              const img = images.find(i => i.id === selectedImageId)
-              if (!img) {
-                return <div style={{ opacity: 0.8, fontSize: 12 }}>Select a logo on the card to edit.</div>
-              }
-              const maxW = Math.max(16, cardWidth - img.x)
-              const maxH = Math.max(16, cardHeight - img.y)
-              return (
+          {/* Selected Logo controls placed under export buttons.
+              Show only when a logo is selected. */}
+          {(() => {
+            const img = images.find(i => i.id === selectedImageId)
+            if (!img) return null
+            const maxW = Math.max(16, cardWidth - img.x)
+            const maxH = Math.max(16, cardHeight - img.y)
+            return (
+              <div style={{ marginTop: 'var(--spacing-4)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <h4 style={{ margin: 0 }}>Selected Logo</h4>
+                  <button className="btn btn-secondary" onClick={() => setSelectedImageId(null)}>✖ Close</button>
+                </div>
                 <div className="form-group" style={{ display: 'grid', gap: '10px' }}>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <div style={{ flex: 1 }}>
@@ -1578,11 +1559,11 @@ const deleteSelectedImage = () => {
                   <label className="form-label">Hue ({img.hue}°)</label>
                   <input
                     type="range"
-                    min="0"
-                    max="360"
+                    min="-180"
+                    max="180"
                     step="1"
                     value={img.hue}
-                    onChange={(e) => updateSelectedImage({ hue: parseInt(e.target.value, 10) })}
+                    onChange={(e) => updateSelectedImage({ hue: parseInt(e.target.value || '0', 10) })}
                   />
 
                   <label className="form-label">Opacity ({img.opacity.toFixed(2)})</label>
@@ -1595,11 +1576,13 @@ const deleteSelectedImage = () => {
                     onChange={(e) => updateSelectedImage({ opacity: parseFloat(e.target.value) })}
                   />
 
-                  <button className="btn btn-secondary" onClick={deleteSelectedImage}>🗑️ Delete Selected Logo</button>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button className="btn btn-secondary" onClick={() => deleteSelectedImage()}>🗑️ Remove</button>
+                  </div>
                 </div>
-              )
-            })()}
-          </div>
+              </div>
+            )
+          })()}
         </div>
 
         {/* Template Library */}

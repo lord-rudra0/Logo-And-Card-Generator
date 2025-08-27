@@ -39,10 +39,13 @@ export default function HowToUse() {
           <li><b>Logos</b>: Drag to move; select to highlight. Use the corner handle to resize within bounds.</li>
           <li><b>Icons</b>: Drag to place. Their color/size can be edited from the Icons list in Left Tools.</li>
           <li><b>Export</b>: Use <b>📸 Export PNG</b> or <b>📄 Export PDF</b> to download.</li>
+          <li><b>Decorative Shapes</b>: Some templates include colored bands/arcs/curves that render behind all content and are non-interactive.</li>
+          <li><b>Layering</b>: Logos are rendered above shapes and text so they remain visible and editable.</li>
           <li><b>Selected Logo Panel</b> (under export buttons):
             <ul>
               <li>Width/Height inputs (bounded by card size).</li>
               <li>Filters: Brightness, Contrast, Saturation, Hue, Opacity.</li>
+              <li><b>Close</b> button to deselect and hide the panel.</li>
               <li>Delete Selected Logo to remove it from the card.</li>
             </ul>
           </li>
