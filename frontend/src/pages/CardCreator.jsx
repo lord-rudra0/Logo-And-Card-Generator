@@ -1365,34 +1365,44 @@ const deleteSelectedImage = () => {
             )}
 
             {/* Draggable images/logos */}
-            {images.map(img => (
-              <DraggableImage
-                key={img.id}
-                src={img.src}
-                x={img.x}
-                y={img.y}
-                width={img.width}
-                height={img.height}
-                rotation={img.rotation}
-                locked={locked}
-                snapToGrid={snapToGrid}
-                gridSize={gridSize}
-                getBounds={() => cardRef.current?.getBoundingClientRect()}
-                style={{ zIndex: 2 }}
-                // selection + resize
-                selected={selectedImageId === img.id}
-                onSelect={() => setSelectedImageId(img.id)}
-                // filters
-                brightness={img.brightness}
-                contrast={img.contrast}
-                saturation={img.saturation}
-                hue={img.hue}
-                opacity={img.opacity}
-                onChange={(partial) => {
-                  setImages(prev => prev.map(it => it.id === img.id ? { ...it, ...partial } : it))
-                }}
-              />
-            ))}
+            {images.map(img => {
+              const shapeStyle =
+                img.shape === 'circle' ? { borderRadius: '50%' } :
+                img.shape === 'rounded' ? { borderRadius: 12 } :
+                img.shape === 'oval' ? { borderRadius: '50% / 35%' } :
+                img.shape === 'diamond' ? { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' } :
+                img.shape === 'hexagon' ? { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' } :
+                {}
+              return (
+                <DraggableImage
+                  key={img.id}
+                  src={img.src}
+                  x={img.x}
+                  y={img.y}
+                  width={img.width}
+                  height={img.height}
+                  rotation={img.rotation}
+                  locked={locked}
+                  snapToGrid={snapToGrid}
+                  gridSize={gridSize}
+                  getBounds={() => cardRef.current?.getBoundingClientRect()}
+                  style={{ zIndex: 10 }}
+                  imageStyle={shapeStyle}
+                  // selection + resize
+                  selected={selectedImageId === img.id}
+                  onSelect={() => setSelectedImageId(img.id)}
+                  // filters
+                  brightness={img.brightness}
+                  contrast={img.contrast}
+                  saturation={img.saturation}
+                  hue={img.hue}
+                  opacity={img.opacity}
+                  onChange={(partial) => {
+                    setImages(prev => prev.map(it => it.id === img.id ? { ...it, ...partial } : it))
+                  }}
+                />
+              )
+            })}
 
             {/* Icons */}
             {icons.map(ic => (
@@ -1489,12 +1499,34 @@ const deleteSelectedImage = () => {
             const maxW = Math.max(16, cardWidth - img.x)
             const maxH = Math.max(16, cardHeight - img.y)
             return (
-              <div style={{ marginTop: 'var(--spacing-4)' }}>
+              <div
+                style={{
+                  marginTop: 'var(--spacing-4)',
+                  background: 'var(--panel, #0f172a)',
+                  border: '1px solid var(--panel-muted, rgba(255,255,255,0.08))',
+                  borderRadius: 8,
+                  padding: 12,
+                  boxShadow: '0 6px 20px rgba(0,0,0,0.25)'
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <h4 style={{ margin: 0 }}>Selected Logo</h4>
                   <button className="btn btn-secondary" onClick={() => setSelectedImageId(null)}>✖ Close</button>
                 </div>
                 <div className="form-group" style={{ display: 'grid', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <label className="form-label">Shape</label>
+                      <select className="input" value={img.shape || 'square'} onChange={(e) => updateSelectedImage({ shape: e.target.value })}>
+                        <option value="square">Square</option>
+                        <option value="rounded">Rounded</option>
+                        <option value="circle">Circle</option>
+                        <option value="oval">Oval</option>
+                        <option value="diamond">Diamond</option>
+                        <option value="hexagon">Hexagon</option>
+                      </select>
+                    </div>
+                  </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <div style={{ flex: 1 }}>
                       <label className="form-label">Width (px)</label>

@@ -28,6 +28,7 @@ export default function DraggableImage({
   hue = 0,
   opacity = 1,
   style,
+  imageStyle,
 }) {
   const ref = useRef(null)
   const [dragging, setDragging] = useState(false)
@@ -160,7 +161,12 @@ export default function DraggableImage({
       }}
     >
       {/* eslint-disable-next-line */}
-      <img src={src} alt="asset" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
+      <img
+        src={src}
+        alt="asset"
+        draggable={false}
+        style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none', ...imageStyle }}
+      />
       {enableResize && selected && (
         <div
           onMouseDown={onResizeStart}
