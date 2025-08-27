@@ -235,9 +235,21 @@ function MiniCardPreview({ suggestion }) {
   const titleMeta = elements.title || {}
   const companyMeta = elements.company || {}
 
-  const namePos = positionToCoordsMini(nameMeta.position)
-  const titlePos = positionToCoordsMini(titleMeta.position)
-  const companyPos = positionToCoordsMini(companyMeta.position)
+  // Support absolute percentage positioning and per-element pixel offsets
+  const withOffsetsMini = (pt, meta) => ({
+    x: Math.round((pt.x || 0) + (meta.offsetX || 0)),
+    y: Math.round((pt.y || 0) + (meta.offsetY || 0))
+  })
+  const fromMetaMini = (meta, fallback) => {
+    if (typeof meta?.xPct === 'number' && typeof meta?.yPct === 'number') {
+      return { x: Math.round(meta.xPct * W), y: Math.round(meta.yPct * H) }
+    }
+    return positionToCoordsMini(meta?.position || fallback)
+  }
+
+  const namePos = withOffsetsMini(fromMetaMini(nameMeta, 'center left'), nameMeta)
+  const titlePos = withOffsetsMini(fromMetaMini(titleMeta, 'center left'), titleMeta)
+  const companyPos = withOffsetsMini(fromMetaMini(companyMeta, 'top left'), companyMeta)
 
   const sample = normalized?.content || {}
 
@@ -248,10 +260,10 @@ function MiniCardPreview({ suggestion }) {
       <div style={{ position: 'absolute', left: companyPos.x, top: companyPos.y, fontSize: sizeToPxMini('company', companyMeta.size), opacity: 0.95 }}>
         {sample.company || 'Company'}
       </div>
-      <div style={{ position: 'absolute', left: namePos.x, top: namePos.y + 20, fontWeight: 600, fontSize: sizeToPxMini('name', nameMeta.size) }}>
+      <div style={{ position: 'absolute', left: namePos.x, top: namePos.y, fontWeight: 600, fontSize: sizeToPxMini('name', nameMeta.size) }}>
         {sample.name || 'Your Name'}
       </div>
-      <div style={{ position: 'absolute', left: titlePos.x, top: titlePos.y + 44, fontSize: sizeToPxMini('title', titleMeta.size), opacity: 0.9 }}>
+      <div style={{ position: 'absolute', left: titlePos.x, top: titlePos.y, fontSize: sizeToPxMini('title', titleMeta.size), opacity: 0.9 }}>
         {sample.title || 'Title'}
       </div>
     </div>
@@ -280,6 +292,8 @@ const CardCreator = () => {
   })
 
   const [aiSuggestions, setAiSuggestions] = useState([])
+  // Custom templates stored locally
+  const [customTemplates, setCustomTemplates] = useState([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationMode, setGenerationMode] = useState('svg') // 'svg' | 'png'
 
@@ -731,11 +745,18 @@ const deleteSelectedImage = () => {
       setTitleSize(titlePx)
       setCompanySize(companyPx)
 
+      const withOffsets = (pt, meta) => ({ x: Math.round((pt.x || 0) + (meta.offsetX || 0)), y: Math.round((pt.y || 0) + (meta.offsetY || 0)) })
+      const fromMeta = (meta, fallback) => {
+        if (typeof meta.xPct === 'number' && typeof meta.yPct === 'number') {
+          return { x: Math.round(meta.xPct * cardWidth), y: Math.round(meta.yPct * cardHeight) }
+        }
+        return positionToCoords(meta.position || fallback)
+      }
       const newPositions = { ...positions }
-      if (nameMeta.position) newPositions.name = positionToCoords(nameMeta.position)
-      if (titleMeta.position) newPositions.title = positionToCoords(titleMeta.position)
-      if (companyMeta.position) newPositions.company = positionToCoords(companyMeta.position)
-      if (contactsMeta.position) newPositions.contacts = positionToCoords(contactsMeta.position)
+      if (nameMeta) newPositions.name = withOffsets(fromMeta(nameMeta, 'center left'), nameMeta)
+      if (titleMeta) newPositions.title = withOffsets(fromMeta(titleMeta, 'center left'), titleMeta)
+      if (companyMeta) newPositions.company = withOffsets(fromMeta(companyMeta, 'top left'), companyMeta)
+      if (contactsMeta) newPositions.contacts = withOffsets(fromMeta(contactsMeta, 'bottom left'), contactsMeta)
       setPositions(newPositions)
     }
   }
