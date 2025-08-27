@@ -1348,6 +1348,7 @@ const deleteSelectedImage = () => {
         <div className="preview-sticky-wrap" style={{ marginBottom: 'var(--spacing-6)' }}>
           <h2>Business Card Preview</h2>
           <div ref={cardRef} className="business-card-preview animate-scale-in" id="business-card-preview" style={getCardStyle()}>
+            {(() => { /* small left padding boost for text when left-aligned */ })()}
             {/* Decorative shapes below all content */}
             {shapes.map((s, idx) => renderShape(s, idx))}
             {design.qrCode && (
@@ -1362,6 +1363,40 @@ const deleteSelectedImage = () => {
                   height: '40px' 
                 }} 
               />
+            )}
+
+            {/* Placeholder initials logo — shown only when there are no logos */}
+            {images.length === 0 && (
+              <div
+                title="Placeholder logo (hidden when you add a logo)"
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  top: 12,
+                  width: 64,
+                  height: 64,
+                  borderRadius: '50%',
+                  background: design.primaryColor,
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: 22,
+                  letterSpacing: 0.5,
+                  zIndex: 5,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.25)'
+                }}
+              >
+                {(() => {
+                  const name = (cardData.name || '').trim()
+                  if (!name) return 'AA'
+                  const parts = name.split(/\s+/).filter(Boolean)
+                  const a = parts[0]?.[0]?.toUpperCase() || 'A'
+                  const b = parts[1]?.[0]?.toUpperCase() || parts[0]?.[1]?.toUpperCase() || 'A'
+                  return `${a}${b}`
+                })()}
+              </div>
             )}
 
             {/* Draggable images/logos */}
@@ -1422,31 +1457,38 @@ const deleteSelectedImage = () => {
             ))}
 
             {/* Draggable text blocks */}
-            <div style={{ position: 'absolute', left: positions.name.x, top: positions.name.y, zIndex: 1, cursor: 'move' }}
+            {(() => { const padX = align === 'left' ? 16 : 0; return (
+            <div style={{ position: 'absolute', left: positions.name.x + padX, top: positions.name.y, zIndex: 1, cursor: 'move' }}
                  onMouseDown={(e) => onDragStart('name', e)}
                  onTouchStart={(e) => onDragStart('name', e)}>
               <h3 style={{ margin: 0, fontSize: `${nameSize}px`, color: nameColor }}>
                 {cardData.name || 'Your Name'}
               </h3>
             </div>
+            )})()}
 
-            <div style={{ position: 'absolute', left: positions.title.x, top: positions.title.y, zIndex: 1, cursor: 'move' }}
+            {(() => { const padX = align === 'left' ? 16 : 0; return (
+            <div style={{ position: 'absolute', left: positions.title.x + padX, top: positions.title.y, zIndex: 1, cursor: 'move' }}
                  onMouseDown={(e) => onDragStart('title', e)}
                  onTouchStart={(e) => onDragStart('title', e)}>
               <p style={{ margin: 0, opacity: 0.9, fontSize: `${titleSize}px`, color: titleColor }}>
                 {cardData.title || 'Your Title'}
               </p>
             </div>
+            )})()}
 
-            <div style={{ position: 'absolute', left: positions.company.x, top: positions.company.y, zIndex: 1, cursor: 'move' }}
+            {(() => { const padX = align === 'left' ? 16 : 0; return (
+            <div style={{ position: 'absolute', left: positions.company.x + padX, top: positions.company.y, zIndex: 1, cursor: 'move' }}
                  onMouseDown={(e) => onDragStart('company', e)}
                  onTouchStart={(e) => onDragStart('company', e)}>
               <p style={{ margin: 0, opacity: 0.9, fontSize: `${companySize}px`, color: companyColor }}>
                 {cardData.company || 'Your Company'}
               </p>
             </div>
+            )})()}
 
-            <div style={{ position: 'absolute', left: positions.contacts.x, top: positions.contacts.y, zIndex: 1, cursor: 'move', color: bodyColor }}
+            {(() => { const padX = align === 'left' ? 16 : 0; return (
+            <div style={{ position: 'absolute', left: positions.contacts.x + padX, top: positions.contacts.y, zIndex: 1, cursor: 'move', color: bodyColor }}
                  onMouseDown={(e) => onDragStart('contacts', e)}
                  onTouchStart={(e) => onDragStart('contacts', e)}>
                 <div style={{ margin: 0, fontSize: '12px', opacity: 0.9, display: 'grid', gap: 6 }}>
@@ -1481,6 +1523,7 @@ const deleteSelectedImage = () => {
                 )}
               </div>
             </div>
+            )})()}
           </div>
 
           <div className="flex" style={{ gap: 'var(--spacing-3)', justifyContent: 'center' }}>
