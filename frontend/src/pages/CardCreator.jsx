@@ -62,6 +62,43 @@ function ensureReadableTextColor({ bg, primary, secondary, proposed }) {
     return contrastRatio(black, bg) >= contrastRatio(white, bg) ? black : white
   }
 
+  // Simple vertical collision resolver for text blocks
+  // Ensures blocks (company, name, title, contacts) don't overlap by nudging downward
+  const resolveOverlaps = (pos, sizes) => {
+    const keys = ['company', 'name', 'title', 'contacts']
+    const estHeight = (k) => {
+      if (k === 'name') return Math.round((sizes.name || 20) * 1.25)
+      if (k === 'title') return Math.round((sizes.title || 16) * 1.2)
+      if (k === 'company') return Math.round((sizes.company || 14) * 1.15)
+      if (k === 'contacts') return 56 // multi-line small text block
+      return 18
+    }
+    const spacing = 6
+    const items = keys
+      .filter((k) => pos[k])
+      .map((k) => ({ key: k, x: pos[k].x, y: pos[k].y, h: estHeight(k) }))
+      .sort((a, b) => a.y - b.y)
+
+    for (let i = 1; i < items.length; i++) {
+      const prev = items[i - 1]
+      const cur = items[i]
+      const overlap = prev.y + prev.h + spacing - cur.y
+      if (overlap > 0) {
+        cur.y += overlap
+      }
+    }
+
+    // Clamp within card bounds
+    const maxY = cardHeight - 10
+    items.forEach((it) => { it.y = Math.min(it.y, maxY) })
+
+    const adjusted = { ...pos }
+    items.forEach((it) => {
+      adjusted[it.key] = { x: it.x, y: it.y }
+    })
+    return adjusted
+  }
+
   // No solid bg: consider gradient or primary/secondary pair
   const a = isHex(primary) ? primary : '#3b82f6'
   const b = isHex(secondary) ? secondary : '#1e40af'
@@ -669,7 +706,7 @@ const deleteSelectedImage = () => {
   }
 
   // Apply AI suggestion to current design (template, colors, font, sizes, positions)
-  const applyAiSuggestion = (suggestion) => {
+  const applyAiSuggestion = (suggestion, opts = {}) => {
     if (!suggestion) return
     const normalized = normalizeSuggestion(suggestion)
 
@@ -715,7 +752,8 @@ const deleteSelectedImage = () => {
     const companyMeta = elements.company || {}
     const contactsMeta = elements.contacts || {}
 
-    if (!useHouseLayout) {
+    const shouldApplyPositions = Boolean(opts.forcePositions) || !useHouseLayout
+    if (shouldApplyPositions) {
       let namePx = sizeToPx('name', nameMeta.size)
       let titlePx = sizeToPx('title', titleMeta.size)
       let companyPx = sizeToPx('company', companyMeta.size)
@@ -731,12 +769,20 @@ const deleteSelectedImage = () => {
       setTitleSize(titlePx)
       setCompanySize(companyPx)
 
-      const newPositions = { ...positions }
+      let newPositions = { ...positions }
       if (nameMeta.position) newPositions.name = positionToCoords(nameMeta.position)
       if (titleMeta.position) newPositions.title = positionToCoords(titleMeta.position)
       if (companyMeta.position) newPositions.company = positionToCoords(companyMeta.position)
       if (contactsMeta.position) newPositions.contacts = positionToCoords(contactsMeta.position)
+      // De-overlap text blocks
+      newPositions = resolveOverlaps(newPositions, { name: namePx, title: titlePx, company: companyPx })
       setPositions(newPositions)
+
+      // Adjust text alignment to better match template intent
+      const posStr = (nameMeta.position || '').toString().toLowerCase()
+      if (posStr.includes('right')) setAlign('right')
+      else if (posStr.includes('center') && !posStr.includes('left') && !posStr.includes('right')) setAlign('center')
+      else setAlign('left')
     }
   }
 
@@ -1665,7 +1711,7 @@ const deleteSelectedImage = () => {
           <h3>Template Library</h3>
           <div className="ai-suggestions" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
             {currentTemplates.map((tpl) => (
-              <div key={tpl.id} className="suggestion-card" onClick={() => applyAiSuggestion(tpl)} style={{ cursor: 'pointer', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--panel-muted)' }}>
+              <div key={tpl.id} className="suggestion-card" onClick={() => applyAiSuggestion(tpl, { forcePositions: true })} style={{ cursor: 'pointer', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--panel-muted)' }}>
                 <div style={{ padding: 8, fontSize: 12, fontWeight: 600 }}>{tpl.name}</div>
                 <div style={{ padding: 8 }}>
                   <MiniCardPreview suggestion={tpl} />
