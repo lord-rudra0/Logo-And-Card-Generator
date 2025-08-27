@@ -116,23 +116,36 @@ export async function generateLogoDesign(genAI, logoData) {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
     
     const prompt = `
-      Generate 6 professional logo design suggestions for:
-      Company: ${logoData.companyName}
-      Industry: ${logoData.industry}
-      Initials: ${logoData.initials || 'N/A'}
-      Tagline: ${logoData.tagline || 'N/A'}
-      
-      For each design, provide:
-      1. Logo concept name
-      2. Style (modern, minimalist, corporate, creative, tech, vintage)
-      3. Primary color (hex)
-      4. Icon/symbol suggestion (emoji)
-      5. Typography style
-      6. Design rationale
-      
-      Return as JSON array with objects containing: name, style, primaryColor, icon, typography, description
-      Focus on memorable, scalable designs that work across different mediums.
-    `
+You are a senior logo designer. Generate EXACTLY 6 professional logo concepts.
+
+Brand input:
+- Company: ${logoData.companyName}
+- Industry: ${logoData.industry}
+- Initials: ${logoData.initials || 'N/A'}
+- Tagline: ${logoData.tagline || 'N/A'}
+
+Style direction:
+- Prefer bright, high-contrast, modern looks with vivid gradients (neon, duotone, or gold-on-dark where suitable).
+- Ensure strong legibility on dark and light backgrounds.
+- Use clean geometric shapes and minimal details for scalability.
+
+Output: Return ONLY a JSON array (no prose) of 6 objects. Each object MUST include:
+{
+  "name": string,
+  "style": "modern"|"minimalist"|"corporate"|"creative"|"tech"|"vintage",
+  "primaryColor": string,            // hex
+  "gradient": {                      // optional but recommended
+    "type": "linear"|"radial",
+    "angle": number,                // degrees for linear
+    "stops": [ { "color": string, "at": number } ] // 0..100
+  },
+  "icon": string,                   // emoji or short symbol hint
+  "typography": string,            // Google-safe font name
+  "description": string            // 1 sentence rationale
+}
+
+Diversity: vary colorways (cool/warm/neon/gold), gradient angles, and styles.
+`
 
     const result = await model.generateContent(prompt)
     const response = await result.response

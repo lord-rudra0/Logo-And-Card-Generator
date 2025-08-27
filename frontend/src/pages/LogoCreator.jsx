@@ -1,5 +1,9 @@
 import { useState } from 'react'
 import html2canvas from 'html2canvas'
+import PrebuiltLogosGrid from '../components/PrebuiltLogosGrid.jsx'
+import LogoIconsPanel from '../components/LogoIconsPanel.jsx'
+import PREBUILT_LOGO_TEMPLATES from '../data/logoTemplates.js'
+import EMOJI_ICONS from '../data/emojiIcons.js'
 
 const LogoCreator = () => {
   const [logoData, setLogoData] = useState({
@@ -35,15 +39,14 @@ const LogoCreator = () => {
     'consulting', 'creative', 'real-estate', 'food', 'fitness'
   ]
 
-  const icons = [
-    '💼', '🎯', '🚀', '⚡', '💡', '🔥', '⭐', '💎',
-    '🏢', '💻', '📱', '🎨', '🔧', '⚙️', '🌟', '🔮'
-  ]
+  const icons = EMOJI_ICONS
 
   const colors = [
     '#3b82f6', '#ef4444', '#10b981', '#f59e0b',
     '#8b5cf6', '#06b6d4', '#84cc16', '#f97316'
   ]
+
+  const showLogoIcon = false
 
   const generateAILogo = async () => {
     if (!logoData.companyName) {
@@ -98,6 +101,22 @@ const LogoCreator = () => {
   const handleDesignChange = (field, value) => {
     setDesign(prev => ({ ...prev, [field]: value }))
   }
+
+  // Apply a prebuilt template (gradient-aware)
+  const applyPrebuiltTemplate = (tpl) => {
+    const secondary = tpl?.gradient?.stops?.[1]?.color || design.secondaryColor || tpl.primaryColor
+    setDesign(prev => ({
+      ...prev,
+      style: tpl.style || prev.style,
+      icon: tpl.icon || prev.icon,
+      primaryColor: tpl.primaryColor || prev.primaryColor,
+      secondaryColor: secondary,
+      font: tpl.typography || prev.font
+    }))
+  }
+
+  // For now, do not show any icon in preview (component-scope const)
+  // (Already declared above)
 
   const getLogoStyle = () => {
     const baseStyle = {
@@ -164,18 +183,12 @@ const LogoCreator = () => {
           ))}
         </div>
 
-        <h4 style={{ marginTop: 'var(--spacing-6)' }}>Icons</h4>
-        <div className="template-grid">
-          {icons.map(icon => (
-            <div
-              key={icon}
-              className={`template-item ${design.icon === icon ? 'active' : ''}`}
-              onClick={() => handleDesignChange('icon', icon)}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}
-            >
-              {icon}
-            </div>
-          ))}
+        <div style={{ marginTop: 'var(--spacing-6)' }}>
+          <LogoIconsPanel
+            icons={icons}
+            value={design.icon}
+            onSelect={(icon) => handleDesignChange('icon', icon)}
+          />
         </div>
 
         <h4 style={{ marginTop: 'var(--spacing-6)' }}>Colors</h4>
@@ -216,9 +229,11 @@ const LogoCreator = () => {
             <div style={{ textAlign: 'center' }}>
               {design.layout === 'vertical' ? (
                 <div>
-                  <div style={{ fontSize: '2rem', marginBottom: 'var(--spacing-2)' }}>
-                    {design.icon}
-                  </div>
+                  {showLogoIcon && (
+                    <div style={{ fontSize: '2rem', marginBottom: 'var(--spacing-2)' }}>
+                      {design.icon}
+                    </div>
+                  )}
                   <div style={{ ...getLogoStyle(), fontSize: '1.5rem', fontWeight: '600' }}>
                     {logoData.companyName || 'Company Name'}
                   </div>
@@ -230,9 +245,11 @@ const LogoCreator = () => {
                 </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-3)', justifyContent: 'center' }}>
-                  <div style={{ fontSize: '2rem' }}>
-                    {design.icon}
-                  </div>
+                  {showLogoIcon && (
+                    <div style={{ fontSize: '2rem' }}>
+                      {design.icon}
+                    </div>
+                  )}
                   <div>
                     <div style={{ ...getLogoStyle(), fontSize: '1.5rem', fontWeight: '600' }}>
                       {logoData.companyName || 'Company Name'}
@@ -258,6 +275,14 @@ const LogoCreator = () => {
           </div>
         </div>
 
+        {/* Prebuilt professional logo cards */}
+        <PrebuiltLogosGrid 
+          templates={PREBUILT_LOGO_TEMPLATES}
+          onApply={applyPrebuiltTemplate}
+        />
+
+        {/* Additional icon pickers can be added here if needed */}
+
         {aiSuggestions.length > 0 && (
           <div>
             <h3>AI Generated Logo Suggestions</h3>
@@ -270,6 +295,8 @@ const LogoCreator = () => {
                     handleDesignChange('style', suggestion.style)
                     handleDesignChange('icon', suggestion.icon)
                     handleDesignChange('primaryColor', suggestion.primaryColor)
+                    const sec = suggestion?.gradient?.stops?.[1]?.color
+                    if (sec) handleDesignChange('secondaryColor', sec)
                   }}
                 >
                   <div style={{ padding: 'var(--spacing-2)', fontSize: '0.75rem', textAlign: 'center' }}>
