@@ -5,7 +5,7 @@ import React, { useState } from 'react'
 // - icons: string[] (emoji list)
 // - value: current selected icon (string)
 // - onSelect: function(icon)
-export default function LogoIconsPanel({ icons = [], value, onSelect }) {
+export default function LogoIconsPanel({ icons = [], value, onSelect, onOpen }) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -15,7 +15,13 @@ export default function LogoIconsPanel({ icons = [], value, onSelect }) {
         <button
           className="btn btn-secondary"
           style={{ padding: '6px 10px' }}
-          onClick={() => setOpen(o => !o)}
+          onClick={() => {
+            setOpen(o => {
+              const next = !o
+              if (next) onOpen && onOpen()
+              return next
+            })
+          }}
         >
           {open ? 'Hide' : 'Show'}
         </button>

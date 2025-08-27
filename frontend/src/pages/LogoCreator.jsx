@@ -1,9 +1,15 @@
 import { useState } from 'react'
 import html2canvas from 'html2canvas'
 import PrebuiltLogosGrid from '../components/PrebuiltLogosGrid.jsx'
-import LogoIconsPanel from '../components/LogoIconsPanel.jsx'
+import IconsDropdown from '../components/IconsDropdown.jsx'
 import PREBUILT_LOGO_TEMPLATES from '../data/logoTemplates.js'
 import EMOJI_ICONS from '../data/emojiIcons.js'
+import { loadEmojis } from '../utils/emojiLoader.js'
+import FontSelectDropdown from '../components/FontSelectDropdown.jsx'
+import ColorPalettesDropdown from '../components/ColorPalettesDropdown.jsx'
+import ShapesDropdown from '../components/ShapesDropdown.jsx'
+import LayoutTemplatesDropdown from '../components/LayoutTemplatesDropdown.jsx'
+import StylesDropdown from '../components/StylesDropdown.jsx'
 
 const LogoCreator = () => {
   const [logoData, setLogoData] = useState({
@@ -17,9 +23,11 @@ const LogoCreator = () => {
     style: 'modern',
     primaryColor: '#3b82f6',
     secondaryColor: '#1e40af',
-    font: 'Inter',
+    font: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
     icon: '💼',
-    layout: 'horizontal'
+    layout: 'horizontal', // legacy layout (horizontal ~ icon-beside, vertical ~ icon-above)
+    shape: 'none',
+    layoutTemplate: 'icon-beside'
   })
 
   const [aiSuggestions, setAiSuggestions] = useState([])
@@ -39,7 +47,17 @@ const LogoCreator = () => {
     'consulting', 'creative', 'real-estate', 'food', 'fitness'
   ]
 
-  const icons = EMOJI_ICONS
+  const [icons, setIcons] = useState(EMOJI_ICONS)
+  const [iconsLoaded, setIconsLoaded] = useState(false)
+
+  const ensureLargeEmojiSet = async () => {
+    if (iconsLoaded) return
+    const big = await loadEmojis(1200)
+    if (big && big.length) {
+      setIcons(big)
+      setIconsLoaded(true)
+    }
+  }
 
   const colors = [
     '#3b82f6', '#ef4444', '#10b981', '#f59e0b',
@@ -150,6 +168,43 @@ const LogoCreator = () => {
     }
   }
 
+  const getShapeBox = () => {
+    if (!logoData.initials || design.shape === 'none') return null
+    const size = 64
+    const common = {
+      width: size,
+      height: size,
+      background: design.primaryColor,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: '#ffffff',
+      fontWeight: 700,
+      letterSpacing: '1px'
+    }
+
+    const shapeStyle = (() => {
+      switch (design.shape) {
+        case 'circle':
+          return { borderRadius: '50%' }
+        case 'square':
+          return { borderRadius: 8 }
+        case 'hexagon':
+          return { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' }
+        case 'triangle':
+          return { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }
+        default:
+          return {}
+      }
+    })()
+
+    return (
+      <div style={{ ...common, ...shapeStyle }}>
+        <span style={{ fontFamily: design.font }}>{logoData.initials.slice(0, 3).toUpperCase()}</span>
+      </div>
+    )
+  }
+
   return (
     <div className="creator-container">
       {/* Left tools column to match Business Card 3-column layout */}
@@ -167,29 +222,22 @@ const LogoCreator = () => {
           </button>
         </div>
 
-        <h4>Styles</h4>
-        <div className="template-grid">
-          {styles.map(style => (
-            <div
-              key={style.id}
-              className={`template-item ${design.style === style.id ? 'active' : ''}`}
-              onClick={() => handleDesignChange('style', style.id)}
-            >
-              <div style={{ padding: 'var(--spacing-2)', textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem' }}>{style.icon}</div>
-                <div style={{ fontSize: '0.75rem' }}>{style.name}</div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <StylesDropdown
+          value={design.style}
+          onChange={(val) => handleDesignChange('style', val)}
+        />
 
-        <div style={{ marginTop: 'var(--spacing-6)' }}>
-          <LogoIconsPanel
-            icons={icons}
-            value={design.icon}
-            onSelect={(icon) => handleDesignChange('icon', icon)}
-          />
-        </div>
+        <IconsDropdown
+          icons={icons}
+          value={design.icon}
+          onChange={(icon) => handleDesignChange('icon', icon)}
+          onFocus={ensureLargeEmojiSet}
+        />
+
+        <FontSelectDropdown
+          value={design.font}
+          onChange={(stack) => handleDesignChange('font', stack)}
+        />
 
         <h4 style={{ marginTop: 'var(--spacing-6)' }}>Colors</h4>
         <div className="color-picker-grid">
@@ -202,6 +250,15 @@ const LogoCreator = () => {
             />
           ))}
         </div>
+
+        <ColorPalettesDropdown
+          primary={design.primaryColor}
+          secondary={design.secondaryColor}
+          onChange={(p, s) => {
+            handleDesignChange('primaryColor', p)
+            handleDesignChange('secondaryColor', s)
+          }}
+        />
 
         <h4 style={{ marginTop: 'var(--spacing-6)' }}>Layout</h4>
         <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
@@ -220,6 +277,16 @@ const LogoCreator = () => {
             Vertical
           </button>
         </div>
+
+        <LayoutTemplatesDropdown
+          value={design.layoutTemplate}
+          onChange={(tpl) => handleDesignChange('layoutTemplate', tpl)}
+        />
+
+        <ShapesDropdown
+          value={design.shape}
+          onChange={(shape) => handleDesignChange('shape', shape)}
+        />
       </div>
 
       <div className="creator-main animate-fade-up animate-delay-2">
@@ -227,41 +294,76 @@ const LogoCreator = () => {
           <h2>Logo Preview</h2>
           <div className="logo-preview" id="logo-preview">
             <div style={{ textAlign: 'center' }}>
-              {design.layout === 'vertical' ? (
-                <div>
-                  {showLogoIcon && (
-                    <div style={{ fontSize: '2rem', marginBottom: 'var(--spacing-2)' }}>
-                      {design.icon}
-                    </div>
-                  )}
+              {(() => {
+                const title = (
                   <div style={{ ...getLogoStyle(), fontSize: '1.5rem', fontWeight: '600' }}>
                     {logoData.companyName || 'Company Name'}
                   </div>
-                  {logoData.tagline && (
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 'var(--spacing-1)' }}>
-                      {logoData.tagline}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-3)', justifyContent: 'center' }}>
-                  {showLogoIcon && (
-                    <div style={{ fontSize: '2rem' }}>
-                      {design.icon}
-                    </div>
-                  )}
-                  <div>
-                    <div style={{ ...getLogoStyle(), fontSize: '1.5rem', fontWeight: '600' }}>
-                      {logoData.companyName || 'Company Name'}
-                    </div>
-                    {logoData.tagline && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        {logoData.tagline}
-                      </div>
-                    )}
+                )
+                const tag = logoData.tagline ? (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 'var(--spacing-1)' }}>
+                    {logoData.tagline}
                   </div>
-                </div>
-              )}
+                ) : null
+
+                const iconEl = showLogoIcon ? (
+                  <div style={{ fontSize: '2rem' }}>{design.icon}</div>
+                ) : null
+
+                const shapeEl = getShapeBox()
+
+                switch (design.layoutTemplate) {
+                  case 'icon-above':
+                    return (
+                      <div>
+                        {iconEl}
+                        {title}
+                        {tag}
+                      </div>
+                    )
+                  case 'icon-beside':
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-3)', justifyContent: 'center' }}>
+                        {iconEl}
+                        <div>
+                          {title}
+                          {tag}
+                        </div>
+                      </div>
+                    )
+                  case 'text-only':
+                    return (
+                      <div>
+                        {title}
+                        {tag}
+                      </div>
+                    )
+                  case 'initials-in-shape':
+                    return (
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--spacing-2)' }}>
+                          {shapeEl}
+                        </div>
+                        {title}
+                        {tag}
+                      </div>
+                    )
+                  case 'symbol-initials':
+                    return (
+                      <div style={{ display: 'flex', gap: 'var(--spacing-3)', justifyContent: 'center', alignItems: 'center' }}>
+                        {iconEl}
+                        {shapeEl || <div style={{ ...getLogoStyle(), fontSize: '1.25rem', fontWeight: 700 }}>{(logoData.initials || 'AA').slice(0,3).toUpperCase()}</div>}
+                      </div>
+                    )
+                  default:
+                    return (
+                      <div>
+                        {title}
+                        {tag}
+                      </div>
+                    )
+                }
+              })()}
             </div>
           </div>
 
