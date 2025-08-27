@@ -9,6 +9,12 @@ import AssetManager from '../components/AssetManager.jsx'
 import DraggableImage from '../components/DraggableImage.jsx'
 import GENERATED_TEMPLATES from '../data/templates.js'
 
+// Font options available for selection (Google Fonts)
+const FONT_OPTIONS = [
+  'Inter', 'Poppins', 'Montserrat', 'Raleway', 'Lato', 'Nunito', 'Rubik', 'Source Sans 3', 'Work Sans', 'Manrope',
+  'DM Sans', 'Outfit', 'Urbanist', 'Kanit', 'Open Sans', 'Roboto', 'Barlow', 'Hind', 'Mulish', 'Titillium Web'
+]
+
 // ---- Global helpers (usable by both MiniCardPreview and CardCreator) ----
 // Basic hex validator
 function isHex(val) {
@@ -1138,48 +1144,32 @@ const deleteSelectedImage = () => {
             Right
           </button>
         </div>
-        <div className="form-group">
-          <label className="form-label">Offset X ({offsetX}px)</label>
-          <input
-            type="range"
-            min="-200"
-            max="200"
-            value={offsetX}
-            onChange={(e) => setOffsetX(parseInt(e.target.value, 10))}
-          />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Offset Y ({offsetY}px)</label>
-          <input
-            type="range"
-            min="-200"
-            max="200"
-            value={offsetY}
-            onChange={(e) => setOffsetY(parseInt(e.target.value, 10))}
-          />
+        <div className="form-group" style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
+          <div style={{ flex: 1 }}>
+            <label className="form-label">Offset X ({offsetX}px)</label>
+            <input
+              type="range"
+              min="-200"
+              max="200"
+              value={offsetX}
+              onChange={(e) => setOffsetX(parseInt(e.target.value, 10))}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="form-label">Offset Y ({offsetY}px)</label>
+            <input
+              type="range"
+              min="-200"
+              max="200"
+              value={offsetY}
+              onChange={(e) => setOffsetY(parseInt(e.target.value, 10))}
+            />
+          </div>
         </div>
 
-        {/* Layout helpers */}
+        {/* Layout helpers (moved above Card Size) */}
         <div className="form-group" style={{ display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-3)' }}>
           <button className="btn btn-primary" onClick={tidyLayout}>✨ Auto tidy layout</button>
-        </div>
-        <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input id="keep-layout" type="checkbox" checked={useHouseLayout} onChange={(e) => setUseHouseLayout(e.target.checked)} />
-          <label htmlFor="keep-layout" className="form-label" style={{ margin: 0 }}>Keep house layout when applying AI</label>
-        </div>
-
-        {/* House templates */}
-        <h4 style={{ marginTop: 'var(--spacing-6)' }}>House Templates</h4>
-        <div style={{ display: 'grid', gap: '8px' }}>
-          {houseTemplates.map(t => (
-            <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--panel-muted)', padding: '8px 10px', borderRadius: 8 }}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{t.name}</div>
-                <div style={{ opacity: 0.8, fontSize: 12 }}>{t.desc}</div>
-              </div>
-              <button className="btn btn-secondary" onClick={() => applyHouseTemplate(t.id)}>Apply</button>
-            </div>
-          ))}
         </div>
 
         {/* Card size controls */}
@@ -1209,16 +1199,18 @@ const deleteSelectedImage = () => {
 
         {/* Typography controls */}
         <h4 style={{ marginTop: 'var(--spacing-6)' }}>Typography</h4>
-        <div className="form-group">
-          <label className="form-label">Name Size ({nameSize}px)</label>
-          <input
-            type="range"
-            min="12"
-            max="48"
-            value={nameSize}
-            onChange={(e) => setNameSize(parseInt(e.target.value, 10))}
-          />
-          <div style={{ marginTop: 'var(--spacing-2)' }}>
+        <div className="form-group" style={{ display: 'flex', gap: 'var(--spacing-2)', alignItems: 'center' }}>
+          <div style={{ flex: 1 }}>
+            <label className="form-label">Name Size ({nameSize}px)</label>
+            <input
+              type="range"
+              min="12"
+              max="48"
+              value={nameSize}
+              onChange={(e) => setNameSize(parseInt(e.target.value, 10))}
+            />
+          </div>
+          <div style={{ width: 160 }}>
             <label className="form-label" style={{ display: 'block' }}>Name Color</label>
             <input
               type="color"
@@ -1228,16 +1220,18 @@ const deleteSelectedImage = () => {
           </div>
         </div>
 
-        <div className="form-group">
-          <label className="form-label">Title Size ({titleSize}px)</label>
-          <input
-            type="range"
-            min="10"
-            max="36"
-            value={titleSize}
-            onChange={(e) => setTitleSize(parseInt(e.target.value, 10))}
-          />
-          <div style={{ marginTop: 'var(--spacing-2)' }}>
+        <div className="form-group" style={{ display: 'flex', gap: 'var(--spacing-2)', alignItems: 'center' }}>
+          <div style={{ flex: 1 }}>
+            <label className="form-label">Title Size ({titleSize}px)</label>
+            <input
+              type="range"
+              min="10"
+              max="36"
+              value={titleSize}
+              onChange={(e) => setTitleSize(parseInt(e.target.value, 10))}
+            />
+          </div>
+          <div style={{ width: 160 }}>
             <label className="form-label" style={{ display: 'block' }}>Title Color</label>
             <input
               type="color"
@@ -1247,16 +1241,18 @@ const deleteSelectedImage = () => {
           </div>
         </div>
 
-        <div className="form-group">
-          <label className="form-label">Company Size ({companySize}px)</label>
-          <input
-            type="range"
-            min="10"
-            max="30"
-            value={companySize}
-            onChange={(e) => setCompanySize(parseInt(e.target.value, 10))}
-          />
-          <div style={{ marginTop: 'var(--spacing-2)' }}>
+        <div className="form-group" style={{ display: 'flex', gap: 'var(--spacing-2)', alignItems: 'center' }}>
+          <div style={{ flex: 1 }}>
+            <label className="form-label">Company Size ({companySize}px)</label>
+            <input
+              type="range"
+              min="10"
+              max="30"
+              value={companySize}
+              onChange={(e) => setCompanySize(parseInt(e.target.value, 10))}
+            />
+          </div>
+          <div style={{ width: 160 }}>
             <label className="form-label" style={{ display: 'block' }}>Company Color</label>
             <input
               type="color"
@@ -1273,6 +1269,43 @@ const deleteSelectedImage = () => {
             value={bodyColor}
             onChange={(e) => setBodyColor(e.target.value)}
           />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Font Family</label>
+          <select
+            className="input"
+            value={design.font}
+            onChange={(e) => {
+              const family = e.target.value
+              loadGoogleFont(family)
+              try { localStorage.setItem('card_font', family) } catch (_) { /* ignore */ }
+              setDesign(prev => ({ ...prev, font: family }))
+            }}
+          >
+            {FONT_OPTIONS.map((f) => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input id="keep-layout" type="checkbox" checked={useHouseLayout} onChange={(e) => setUseHouseLayout(e.target.checked)} />
+          <label htmlFor="keep-layout" className="form-label" style={{ margin: 0 }}>Keep house layout when applying AI</label>
+        </div>
+
+        {/* House templates (moved below Font Family) */}
+        <h4 style={{ marginTop: 'var(--spacing-6)' }}>House Templates</h4>
+        <div style={{ display: 'grid', gap: '8px' }}>
+          {houseTemplates.map(t => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--panel-muted)', padding: '8px 10px', borderRadius: 8 }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{t.name}</div>
+                <div style={{ opacity: 0.8, fontSize: 12 }}>{t.desc}</div>
+              </div>
+              <button className="btn btn-secondary" onClick={() => applyHouseTemplate(t.id)}>Apply</button>
+            </div>
+          ))}
         </div>
 
         {/* Background controls */}
