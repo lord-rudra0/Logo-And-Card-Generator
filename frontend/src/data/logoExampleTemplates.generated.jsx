@@ -104,9 +104,20 @@ function makeProceduralTemplate(kind, index) {
     })()
 
     return (
-      <svg ref={ref} xmlns="http://www.w3.org/2000/svg" width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ background: 'transparent' }}>
-        {content}
-        {commonText}
+      <svg
+        ref={ref}
+        xmlns="http://www.w3.org/2000/svg"
+        width={SIZE}
+        height={SIZE}
+        viewBox={`0 0 ${SIZE} ${SIZE}`}
+        preserveAspectRatio="xMidYMid meet"
+        style={{ background: 'transparent' }}
+      >
+        {/* Scale down slightly to ensure no element touches edges */}
+        <g transform="translate(128,128) scale(0.88) translate(-128,-128)">
+          {content}
+          {commonText}
+        </g>
       </svg>
     )
   }

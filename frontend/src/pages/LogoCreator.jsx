@@ -391,7 +391,7 @@ const LogoCreator = () => {
       </div>
 
       <div className="creator-main animate-fade-up animate-delay-2">
-        <div style={{ marginBottom: 'var(--spacing-6)' }}>
+        <div className="preview-sticky-wrap" style={{ marginBottom: 'var(--spacing-6)' }}>
           <h2>Logo Preview</h2>
           <div className="logo-preview" id="logo-preview">
             <div style={{ textAlign: 'center' }}>

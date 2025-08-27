@@ -149,6 +149,14 @@ main {
   justify-content: center;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   margin: 0 auto var(--spacing-6);
+  overflow: hidden; /* prevent any overflow beyond card */
+}
+
+/* Make any rendered SVG scale to fit the preview card */
+.logo-preview svg {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
 }
 
 .template-grid {
