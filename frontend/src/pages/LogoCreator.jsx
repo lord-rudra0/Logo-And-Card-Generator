@@ -133,7 +133,83 @@ const LogoCreator = () => {
 
   return (
     <div className="creator-container">
-      <div className="creator-main">
+      {/* Left tools column to match Business Card 3-column layout */}
+      <div className="creator-leftbar animate-fade-up animate-delay-1">
+        <h3>Design Tools</h3>
+
+        <div style={{ marginBottom: 'var(--spacing-6)' }}>
+          <button 
+            onClick={generateAILogo} 
+            className="btn btn-primary" 
+            style={{ width: '100%' }}
+            disabled={isGenerating}
+          >
+            {isGenerating ? '🤖 Generating...' : '✨ Generate AI Logo'}
+          </button>
+        </div>
+
+        <h4>Styles</h4>
+        <div className="template-grid">
+          {styles.map(style => (
+            <div
+              key={style.id}
+              className={`template-item ${design.style === style.id ? 'active' : ''}`}
+              onClick={() => handleDesignChange('style', style.id)}
+            >
+              <div style={{ padding: 'var(--spacing-2)', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem' }}>{style.icon}</div>
+                <div style={{ fontSize: '0.75rem' }}>{style.name}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <h4 style={{ marginTop: 'var(--spacing-6)' }}>Icons</h4>
+        <div className="template-grid">
+          {icons.map(icon => (
+            <div
+              key={icon}
+              className={`template-item ${design.icon === icon ? 'active' : ''}`}
+              onClick={() => handleDesignChange('icon', icon)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}
+            >
+              {icon}
+            </div>
+          ))}
+        </div>
+
+        <h4 style={{ marginTop: 'var(--spacing-6)' }}>Colors</h4>
+        <div className="color-picker-grid">
+          {colors.map(color => (
+            <div
+              key={color}
+              className={`color-option ${design.primaryColor === color ? 'active' : ''}`}
+              style={{ backgroundColor: color }}
+              onClick={() => handleDesignChange('primaryColor', color)}
+            />
+          ))}
+        </div>
+
+        <h4 style={{ marginTop: 'var(--spacing-6)' }}>Layout</h4>
+        <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
+          <button
+            className={`btn ${design.layout === 'horizontal' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => handleDesignChange('layout', 'horizontal')}
+            style={{ flex: 1 }}
+          >
+            Horizontal
+          </button>
+          <button
+            className={`btn ${design.layout === 'vertical' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => handleDesignChange('layout', 'vertical')}
+            style={{ flex: 1 }}
+          >
+            Vertical
+          </button>
+        </div>
+      </div>
+
+      <div className="creator-main animate-fade-up animate-delay-2">
         <div style={{ marginBottom: 'var(--spacing-6)' }}>
           <h2>Logo Preview</h2>
           <div className="logo-preview" id="logo-preview">
@@ -209,9 +285,9 @@ const LogoCreator = () => {
         )}
       </div>
 
-      <div className="creator-sidebar">
+      <div className="creator-sidebar animate-fade-up animate-delay-3">
         <h3>Logo Details</h3>
-        
+
         <div className="form-group">
           <label className="form-label">Company Name</label>
           <input 
@@ -260,76 +336,7 @@ const LogoCreator = () => {
           </select>
         </div>
 
-        <div style={{ marginBottom: 'var(--spacing-6)' }}>
-          <button 
-            onClick={generateAILogo} 
-            className="btn btn-primary" 
-            style={{ width: '100%' }}
-            disabled={isGenerating}
-          >
-            {isGenerating ? '🤖 Generating...' : '✨ Generate AI Logo'}
-          </button>
-        </div>
-
-        <h4>Styles</h4>
-        <div className="template-grid">
-          {styles.map(style => (
-            <div
-              key={style.id}
-              className={`template-item ${design.style === style.id ? 'active' : ''}`}
-              onClick={() => handleDesignChange('style', style.id)}
-            >
-              <div style={{ padding: 'var(--spacing-2)', textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem' }}>{style.icon}</div>
-                <div style={{ fontSize: '0.75rem' }}>{style.name}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <h4 style={{ marginTop: 'var(--spacing-6)' }}>Icons</h4>
-        <div className="template-grid">
-          {icons.map(icon => (
-            <div
-              key={icon}
-              className={`template-item ${design.icon === icon ? 'active' : ''}`}
-              onClick={() => handleDesignChange('icon', icon)}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}
-            >
-              {icon}
-            </div>
-          ))}
-        </div>
-
-        <h4 style={{ marginTop: 'var(--spacing-6)' }}>Colors</h4>
-        <div className="color-picker-grid">
-          {colors.map(color => (
-            <div
-              key={color}
-              className={`color-option ${design.primaryColor === color ? 'active' : ''}`}
-              style={{ backgroundColor: color }}
-              onClick={() => handleDesignChange('primaryColor', color)}
-            />
-          ))}
-        </div>
-
-        <h4 style={{ marginTop: 'var(--spacing-6)' }}>Layout</h4>
-        <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
-          <button
-            className={`btn ${design.layout === 'horizontal' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => handleDesignChange('layout', 'horizontal')}
-            style={{ flex: 1 }}
-          >
-            Horizontal
-          </button>
-          <button
-            className={`btn ${design.layout === 'vertical' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => handleDesignChange('layout', 'vertical')}
-            style={{ flex: 1 }}
-          >
-            Vertical
-          </button>
-        </div>
+        {/* Sidebar reserved for textual details only */}
       </div>
     </div>
   )
