@@ -7,6 +7,7 @@ import jsPDF from 'jspdf'
 import QRCode from 'qrcode'
 import AssetManager from '../components/AssetManager.jsx'
 import DraggableImage from '../components/DraggableImage.jsx'
+import GENERATED_TEMPLATES from '../data/templates.js'
 
 // ---- Global helpers (usable by both MiniCardPreview and CardCreator) ----
 // Basic hex validator
@@ -133,6 +134,7 @@ function MiniCardPreview({ suggestion }) {
   const template = normalized?.template || 'modern'
   const typography = normalized?.typography || {}
   const fontFamily = typography.heading || typography.body || 'Inter, Arial, sans-serif'
+  const shapes = normalized?.shapes || []
 
   const styleBase = {
     width: W,
@@ -150,6 +152,54 @@ function MiniCardPreview({ suggestion }) {
     if (template === 'minimal') return { background: '#ffffff', borderLeft: `4px solid ${primary}` }
     // default modern gradient if no bg provided
     return { background: `linear-gradient(135deg, ${primary}, ${secondary})` }
+  }
+
+  const renderShapeMini = (s, idx) => {
+    if (!s || !s.type) return null
+    const base = { position: 'absolute', opacity: s.opacity ?? 1, pointerEvents: 'none' }
+    if (s.type === 'band') {
+      const width = Math.round((s.widthPct ?? 140) * W / 100)
+      const height = s.heightPx ?? 60
+      const x = (s.offsetX ?? 0)
+      const y = (s.offsetY ?? 0)
+      return (
+        <div key={idx}
+          style={{
+            ...base,
+            left: x,
+            top: y,
+            width,
+            height,
+            background: s.color || primary,
+            transform: `rotate(${s.angle ?? 0}deg)`,
+            borderRadius: 12
+          }}
+        />
+      )
+    }
+    if (s.type === 'arc') {
+      const size = s.sizePx ?? 200
+      const pos = (s.position || 'top-right').toLowerCase()
+      const st = { ...base, width: size, height: size, background: s.color || primary, borderRadius: '50%' }
+      if (pos.includes('top')) st.top = (s.offsetY ?? -40)
+      if (pos.includes('bottom')) st.bottom = (s.offsetY ?? -40)
+      if (pos.includes('left')) st.left = (s.offsetX ?? -40)
+      if (pos.includes('right')) st.right = (s.offsetX ?? -40)
+      return <div key={idx} style={st} />
+    }
+    if (s.type === 'curve') {
+      const width = Math.round((s.widthPct ?? 160) * W / 100)
+      const height = s.heightPx ?? 120
+      const pos = (s.position || 'bottom-left').toLowerCase()
+      const st = { ...base, width, height, background: s.color || secondary, transform: `rotate(${s.angle ?? 0}deg)` }
+      st.borderRadius = `${Math.round(height)}px / ${Math.round(height)}px`
+      if (pos.includes('top')) st.top = (s.offsetY ?? -20)
+      if (pos.includes('bottom')) st.bottom = (s.offsetY ?? -20)
+      if (pos.includes('left')) st.left = (s.offsetX ?? -40)
+      if (pos.includes('right')) st.right = (s.offsetX ?? -40)
+      return <div key={idx} style={st} />
+    }
+    return null
   }
 
   const sizeToPxMini = (kind, value) => {
@@ -193,6 +243,8 @@ function MiniCardPreview({ suggestion }) {
 
   return (
     <div style={{ ...styleBase, ...styleBg(), boxShadow: '0 2px 6px rgba(0,0,0,0.25)' }}>
+      {/* Decorative shapes */}
+      {shapes.map((s, idx) => renderShapeMini(s, idx))}
       <div style={{ position: 'absolute', left: companyPos.x, top: companyPos.y, fontSize: sizeToPxMini('company', companyMeta.size), opacity: 0.95 }}>
         {sample.company || 'Company'}
       </div>
@@ -230,6 +282,12 @@ const CardCreator = () => {
   const [aiSuggestions, setAiSuggestions] = useState([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationMode, setGenerationMode] = useState('svg') // 'svg' | 'png'
+
+  // Template library pagination
+  const [templatesPage, setTemplatesPage] = useState(1)
+  const pageSize = 24
+  const totalPages = Math.ceil((GENERATED_TEMPLATES?.length || 0) / pageSize) || 1
+  const currentTemplates = GENERATED_TEMPLATES.slice((templatesPage - 1) * pageSize, templatesPage * pageSize)
 
   // Dynamic controls state
   const [nameSize, setNameSize] = useState(22)
@@ -277,6 +335,8 @@ const CardCreator = () => {
   const [bgImageUrl, setBgImageUrl] = useState('')
   const [images, setImages] = useState([]) // { id, src, x, y, width, height, rotation, brightness, contrast, saturation, hue, opacity }
   const [selectedImageId, setSelectedImageId] = useState(null)
+  // Decorative shapes (bands/arcs/curves) from templates
+  const [shapes, setShapes] = useState([])
 
   // Asset handlers
   const onSetBackground = (url) => setBgImageUrl(url)
@@ -645,6 +705,8 @@ const deleteSelectedImage = () => {
     setTitleColor(safeText)
     setCompanyColor(safeText)
     setBodyColor(safeText)
+    // Apply decorative shapes
+    setShapes(Array.isArray(normalized.shapes) ? normalized.shapes : [])
 
     // Sizes and positions (with hierarchy and layout guards)
     const elements = (normalized.layout && normalized.layout.elements) || {}
@@ -746,6 +808,56 @@ const deleteSelectedImage = () => {
         ? design.backgroundColor
         : `linear-gradient(135deg, ${design.primaryColor}, ${design.secondaryColor})`
     }
+  }
+
+  // Render decorative shapes in main preview
+  const renderShape = (s, idx) => {
+    if (!s || !s.type) return null
+    const base = { position: 'absolute', opacity: s.opacity ?? 1, pointerEvents: 'none' }
+    if (s.type === 'band') {
+      const width = Math.round((s.widthPct ?? 140) * cardWidth / 100)
+      const height = s.heightPx ?? 70
+      const x = (s.offsetX ?? 0)
+      const y = (s.offsetY ?? 0)
+      return (
+        <div key={idx}
+          style={{
+            ...base,
+            left: x,
+            top: y,
+            width,
+            height,
+            background: s.color || design.primaryColor,
+            transform: `rotate(${s.angle ?? 0}deg)`,
+            borderRadius: 14,
+            zIndex: 0
+          }}
+        />
+      )
+    }
+    if (s.type === 'arc') {
+      const size = s.sizePx ?? Math.min(cardWidth, cardHeight)
+      const pos = (s.position || 'top-right').toLowerCase()
+      const st = { ...base, width: size, height: size, background: s.color || design.primaryColor, borderRadius: '50%', zIndex: 0 }
+      if (pos.includes('top')) st.top = (s.offsetY ?? -40)
+      if (pos.includes('bottom')) st.bottom = (s.offsetY ?? -40)
+      if (pos.includes('left')) st.left = (s.offsetX ?? -40)
+      if (pos.includes('right')) st.right = (s.offsetX ?? -40)
+      return <div key={idx} style={st} />
+    }
+    if (s.type === 'curve') {
+      const width = Math.round((s.widthPct ?? 160) * cardWidth / 100)
+      const height = s.heightPx ?? Math.round(cardHeight * 0.45)
+      const pos = (s.position || 'bottom-left').toLowerCase()
+      const st = { ...base, width, height, background: s.color || design.secondaryColor, transform: `rotate(${s.angle ?? 0}deg)`, zIndex: 0 }
+      st.borderRadius = `${Math.round(height)}px / ${Math.round(height)}px`
+      if (pos.includes('top')) st.top = (s.offsetY ?? -20)
+      if (pos.includes('bottom')) st.bottom = (s.offsetY ?? -20)
+      if (pos.includes('left')) st.left = (s.offsetX ?? -40)
+      if (pos.includes('right')) st.right = (s.offsetX ?? -40)
+      return <div key={idx} style={st} />
+    }
+    return null
   }
 
   const contentWrapperStyle = {
@@ -1236,6 +1348,8 @@ const deleteSelectedImage = () => {
         <div className="preview-sticky-wrap" style={{ marginBottom: 'var(--spacing-6)' }}>
           <h2>Business Card Preview</h2>
           <div ref={cardRef} className="business-card-preview animate-scale-in" id="business-card-preview" style={getCardStyle()}>
+            {/* Decorative shapes below all content */}
+            {shapes.map((s, idx) => renderShape(s, idx))}
             {design.qrCode && (
               <img 
                 src={design.qrCode} 
@@ -1464,6 +1578,28 @@ const deleteSelectedImage = () => {
                 </div>
               )
             })()}
+          </div>
+        </div>
+
+        {/* Template Library */}
+        <div style={{ marginTop: 'var(--spacing-6)' }}>
+          <h3>Template Library</h3>
+          <div className="ai-suggestions" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+            {currentTemplates.map((tpl) => (
+              <div key={tpl.id} className="suggestion-card" onClick={() => applyAiSuggestion(tpl)} style={{ cursor: 'pointer', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--panel-muted)' }}>
+                <div style={{ padding: 8, fontSize: 12, fontWeight: 600 }}>{tpl.name}</div>
+                <div style={{ padding: 8 }}>
+                  <MiniCardPreview suggestion={tpl} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 'var(--spacing-3)' }}>
+            <button className="btn btn-secondary" disabled={templatesPage <= 1} onClick={() => setTemplatesPage(p => Math.max(1, p - 1))}>Prev</button>
+            <div style={{ fontSize: 12 }}>Page {templatesPage} / {totalPages}</div>
+            <button className="btn btn-secondary" disabled={templatesPage >= totalPages} onClick={() => setTemplatesPage(p => Math.min(totalPages, p + 1))}>Next</button>
           </div>
         </div>
 
