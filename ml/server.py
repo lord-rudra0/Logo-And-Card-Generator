@@ -40,6 +40,18 @@ class ClipScoreResponse(BaseModel):
     indices: List[int]
     scores: List[float]
 
+class TextToImageRequest(BaseModel):
+    prompt: str = Field(..., description="Text prompt for image generation")
+    negative_prompt: Optional[str] = Field(None, description="Negative prompt to avoid")
+    count: int = Field(1, ge=1, le=8)
+    width: int = Field(512, ge=64, le=2048)
+    height: int = Field(512, ge=64, le=2048)
+    steps: int = Field(20, ge=1, le=100)
+    guidance_scale: float = Field(7.5, ge=1.0, le=20.0)
+
+class TextToImageResponse(BaseModel):
+    images: List[str]  # base64 PNG (data URLs)
+
 
 def make_placeholder_png(text: str, width: int, height: int) -> bytes:
     img = Image.new("RGBA", (width, height), (245, 247, 250, 255))
@@ -135,26 +147,120 @@ async def local_generate_logo(req: GenerateLogoRequest) -> GenerateLogoResponse:
         return GenerateLogoResponse(images=imgs)
 
 
+async def local_text_to_image(req: TextToImageRequest) -> TextToImageResponse:
+    """Generate images from text prompt using SD 1.5 via diffusers.
+    Runs the blocking generation on a background thread.
+    """
+    try:
+        images = await asyncio.to_thread(
+            sd_local.generate_text_to_image,
+            req.prompt,
+            req.negative_prompt,
+            req.count,
+            req.width,
+            req.height,
+            req.steps,
+            req.guidance_scale,
+        )
+        return TextToImageResponse(images=images)
+    except Exception as e:
+        # Fall back to placeholder on any error
+        imgs = [b64_data_url(make_placeholder_png(req.prompt, req.width, req.height)) for _ in range(req.count)]
+        return TextToImageResponse(images=imgs)
+
+
 @app.post("/generate/logo", response_model=GenerateLogoResponse)
 async def generate_logo(req: GenerateLogoRequest):
+    print("\n=== ML SERVICE: LOGO GENERATION STARTED ===")
+    print(f"🎨 ML Step 1: Received logo request")
+    print(f"   - Description: {req.description}")
+    print(f"   - Style: {req.style}")
+    print(f"   - Count: {req.count}")
+    print(f"   - Dimensions: {req.width}x{req.height}")
     backend = os.getenv("GEN_BACKEND", "hosted").lower()
+    print(f"🔧 ML Step 2: Using backend: {backend}")
+    
     if backend == "hosted":
         try:
-            return await hosted_generate_logo(req)
+            print("🌐 ML Step 3: Attempting hosted generation...")
+            result = await hosted_generate_logo(req)
+            print("✅ ML Step 4: Hosted generation successful")
+            return result
         except Exception as e:
+            print(f"❌ ML Step 3: Hosted generation failed: {e}")
+            print("🔄 ML Step 4: Falling back to placeholder...")
             # fallback to placeholder if hosted misconfigured
             text = (req.style + " • " if req.style else "") + req.description
             imgs = [b64_data_url(make_placeholder_png(text, req.width, req.height)) for _ in range(req.count)]
+            print("📝 ML Step 5: Generated placeholder image")
             return GenerateLogoResponse(images=imgs)
     if backend == "local":
-        return await local_generate_logo(req)
+        print("🖥️  ML Step 3: Using local Stable Diffusion generation...")
+        result = await local_generate_logo(req)
+        print("✅ ML Step 4: Local generation completed")
+        print("=== ML SERVICE: LOGO GENERATION COMPLETED ===\n")
+        return result
     # default: placeholder
+    print("📝 ML Step 3: Using default placeholder backend...")
     text = (req.style + " • " if req.style else "") + req.description
     imgs = []
     for i in range(req.count):
         png = make_placeholder_png(text, req.width, req.height)
         imgs.append(b64_data_url(png))
+    print(f"📝 ML Step 4: Generated {len(imgs)} placeholder images")
+    print("=== ML SERVICE: LOGO GENERATION COMPLETED ===\n")
     return GenerateLogoResponse(images=imgs)
+
+
+@app.post("/generate/text-to-image", response_model=TextToImageResponse)
+async def text_to_image(req: TextToImageRequest):
+    print("\n=== ML SERVICE: TEXT-TO-IMAGE GENERATION STARTED ===")
+    print(f"🔥 ML Step 1: Received text-to-image request")
+    print(f"   - Prompt: {req.prompt}")
+    print(f"   - Negative prompt: {req.negative_prompt}")
+    print(f"   - Count: {req.count}")
+    print(f"   - Dimensions: {req.width}x{req.height}")
+    print(f"   - Steps: {req.steps}")
+    print(f"   - Guidance scale: {req.guidance_scale}")
+    backend = os.getenv("GEN_BACKEND", "hosted").lower()
+    print(f"🔧 ML Step 2: Using backend: {backend}")
+    
+    if backend == "local":
+        print("🖥️  ML Step 3: Using local Stable Diffusion generation...")
+        result = await local_text_to_image(req)
+        print("✅ ML Step 4: Local generation completed")
+        print("=== ML SERVICE: TEXT-TO-IMAGE GENERATION COMPLETED ===\n")
+        return result
+    elif backend == "hosted":
+        print("🌐 ML Step 3: Attempting hosted generation...")
+        # For hosted, use same logic as logo generation but with different prompt
+        try:
+            # Convert to GenerateLogoRequest format for hosted generation
+            logo_req = GenerateLogoRequest(
+                description=req.prompt,
+                style=req.negative_prompt,  # Use negative prompt as style modifier
+                count=req.count,
+                width=req.width,
+                height=req.height
+            )
+            result = await hosted_generate_logo(logo_req)
+            print("✅ ML Step 4: Hosted generation successful")
+            print("=== ML SERVICE: TEXT-TO-IMAGE GENERATION COMPLETED ===\n")
+            return TextToImageResponse(images=result.images)
+        except Exception as e:
+            print(f"❌ ML Step 3: Hosted generation failed: {e}")
+            print("🔄 ML Step 4: Falling back to placeholder...")
+            # fallback to placeholder
+            imgs = [b64_data_url(make_placeholder_png(req.prompt, req.width, req.height)) for _ in range(req.count)]
+            print("📝 ML Step 5: Generated placeholder image")
+            return TextToImageResponse(images=imgs)
+    else:
+        # placeholder backend
+        print("📝 ML Step 3: Using default placeholder backend...")
+        imgs = [b64_data_url(make_placeholder_png(req.prompt, req.width, req.height)) for _ in range(req.count)]
+        print(f"📝 ML Step 4: Generated {len(imgs)} placeholder images")
+        print("=== ML SERVICE: TEXT-TO-IMAGE GENERATION COMPLETED ===\n")
+        return TextToImageResponse(images=imgs)
 
 
 @app.post("/score/clip", response_model=ClipScoreResponse)

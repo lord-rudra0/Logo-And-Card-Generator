@@ -8,6 +8,7 @@ import QRCode from 'qrcode'
 import AssetManager from '../components/AssetManager.jsx'
 import DraggableImage from '../components/DraggableImage.jsx'
 import GENERATED_TEMPLATES from '../data/templates.js'
+import TextToImageGenerator from '../components/TextToImageGenerator.jsx'
 
 // Font options available for selection (Google Fonts)
 const FONT_OPTIONS = [
@@ -1924,6 +1925,11 @@ const deleteSelectedImage = () => {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Text-to-Image Generator */}
+        <div style={{ marginTop: 'var(--spacing-6)' }}>
+          <TextToImageGenerator />
         </div>
 
         {/* Left column now contains Colors/Layout/Size/Typography/Background/QR Code */}

@@ -21,6 +21,7 @@ import { exportSvgElement } from '../utils/svgExport.js'
 import LayoutControls from '../components/LayoutControls.jsx'
 import GradientControls from '../components/GradientControls.jsx'
 import { exportPdfFromSvg } from '../utils/pdfExport.js'
+import TextToImageGenerator from '../components/TextToImageGenerator.jsx'
 
 const LogoCreator = () => {
   const [logoData, setLogoData] = useState({
@@ -588,7 +589,10 @@ const LogoCreator = () => {
           />
         </div>
 
-        {/* Additional icon pickers can be added here if needed */}
+        {/* Text-to-Image Generator */}
+        <div style={{ marginTop: 'var(--spacing-6)' }}>
+          <TextToImageGenerator />
+        </div>
       </div>
 
       <div className="creator-sidebar animate-fade-up animate-delay-3">

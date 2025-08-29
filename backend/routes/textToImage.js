@@ -1,42 +1,61 @@
 import express from 'express'
 const router = express.Router()
 
-// POST /api/generateLogo
-// Body: { description: string, style?: string, count?: number, width?: number, height?: number }
-// Proxies to Python ML service at http://localhost:8000/generate/logo
+// POST /api/text-to-image
+// Body: { prompt: string, negative_prompt?: string, count?: number, width?: number, height?: number, steps?: number, guidance_scale?: number }
+// Proxies to Python ML service at http://localhost:8000/generate/text-to-image
 const getFetch = () => (typeof fetch !== 'undefined' ? fetch : (...args) => import('node-fetch').then(({ default: f }) => f(...args)))
 
 router.post('/', async (req, res) => {
-  console.log('\n=== LOGO GENERATION REQUEST STARTED ===')
-  console.log('🎨 Step 1: Received request at /api/generateLogo')
+  console.log('\n=== TEXT-TO-IMAGE REQUEST STARTED ===')
+  console.log('🔥 Step 1: Received request at /api/text-to-image')
   console.log('📝 Raw request body:', JSON.stringify(req.body, null, 2))
   
   try {
-    const { description, style, count = 1, width = 512, height = 512 } = req.body || {}
+    const { 
+      prompt, 
+      negative_prompt, 
+      count = 1, 
+      width = 512, 
+      height = 512, 
+      steps = 20, 
+      guidance_scale = 7.5 
+    } = req.body || {}
     
     console.log('🔍 Step 2: Extracted parameters:')
-    console.log('   - Description:', description)
-    console.log('   - Style:', style)
+    console.log('   - Prompt:', prompt)
+    console.log('   - Negative prompt:', negative_prompt)
     console.log('   - Count:', count)
     console.log('   - Dimensions:', `${width}x${height}`)
+    console.log('   - Steps:', steps)
+    console.log('   - Guidance scale:', guidance_scale)
     
-    if (!description || typeof description !== 'string') {
-      console.log('❌ Step 3: Validation failed - missing or invalid description')
-      return res.status(400).json({ error: 'description (string) is required' })
+    if (!prompt || typeof prompt !== 'string') {
+      console.log('❌ Step 3: Validation failed - missing or invalid prompt')
+      return res.status(400).json({ error: 'prompt (string) is required' })
     }
     
     console.log('✅ Step 3: Validation passed')
-    const payload = { description, style, count, width, height }
+    
+    const payload = { 
+      prompt, 
+      negative_prompt, 
+      count, 
+      width, 
+      height, 
+      steps, 
+      guidance_scale 
+    }
     
     console.log('📦 Step 4: Prepared payload for ML service:')
     console.log(JSON.stringify(payload, null, 2))
     
     const f = getFetch()
-    const mlUrl = process.env.ML_BASE_URL || 'http://127.0.0.1:8000'
-    console.log(`🚀 Step 5: Sending request to ML service at ${mlUrl}/generate/logo`)
+    const mlUrl = process.env.PY_IMAGE_SERVICE_URL || 'http://localhost:8000'
+    console.log(`🚀 Step 5: Sending request to ML service at ${mlUrl}/generate/text-to-image`)
     
     const startTime = Date.now()
-    const r = await f(`${mlUrl}/generate/logo`, {
+    const r = await f(`${mlUrl}/generate/text-to-image`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -44,6 +63,7 @@ router.post('/', async (req, res) => {
     
     const requestTime = Date.now() - startTime
     console.log(`⏱️  Step 6: ML service responded in ${requestTime}ms with status ${r.status}`)
+    
     if (!r.ok) {
       const text = await r.text()
       console.log('❌ Step 7: ML service error:')
@@ -64,15 +84,15 @@ router.post('/', async (req, res) => {
     }
     
     console.log('🎉 Step 9: Sending response back to client')
-    console.log('=== LOGO GENERATION REQUEST COMPLETED ===\n')
+    console.log('=== TEXT-TO-IMAGE REQUEST COMPLETED ===\n')
     
     return res.json(data)
   } catch (err) {
-    console.log('💥 STEP ERROR: Exception caught in generateLogo route:')
+    console.log('💥 STEP ERROR: Exception caught in textToImage route:')
     console.error('   - Error type:', err.constructor.name)
     console.error('   - Error message:', err.message)
     console.error('   - Stack trace:', err.stack)
-    console.log('=== LOGO GENERATION REQUEST FAILED ===\n')
+    console.log('=== TEXT-TO-IMAGE REQUEST FAILED ===\n')
     return res.status(500).json({ error: 'Internal error', message: String(err && err.message || err) })
   }
 })
