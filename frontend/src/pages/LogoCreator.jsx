@@ -12,10 +12,15 @@ import ShapesDropdown from '../components/ShapesDropdown.jsx'
 import LayoutTemplatesDropdown from '../components/LayoutTemplatesDropdown.jsx'
 import StylesDropdown from '../components/StylesDropdown.jsx'
 import { postJson } from '../utils/api.js'
-import ExampleLogosDropdown from '../components/ExampleLogosDropdown.jsx'
+import ExampleLogosSearchDropdown from '../components/ExampleLogosSearchDropdown.jsx'
 import LogoRendererSVG from '../renderers/LogoRendererSVG.jsx'
 import EXAMPLE_TEMPLATES from '../data/logoExampleTemplates.jsx'
 import { buildLogoRequestFromState } from '../types/logoSchema.js'
+import IconControls from '../components/IconControls.jsx'
+import { exportSvgElement } from '../utils/svgExport.js'
+import LayoutControls from '../components/LayoutControls.jsx'
+import GradientControls from '../components/GradientControls.jsx'
+import { exportPdfFromSvg } from '../utils/pdfExport.js'
 
 const LogoCreator = () => {
   const [logoData, setLogoData] = useState({
@@ -25,6 +30,8 @@ const LogoCreator = () => {
     industry: 'technology'
   })
 
+  const [exportSize, setExportSize] = useState(512)
+
   const [design, setDesign] = useState({
     style: 'modern',
     primaryColor: '#3b82f6',
@@ -33,7 +40,17 @@ const LogoCreator = () => {
     icon: '💼',
     layout: 'horizontal', // legacy layout (horizontal ~ icon-beside, vertical ~ icon-above)
     shape: 'none',
-    layoutTemplate: 'icon-beside'
+    layoutTemplate: 'icon-beside',
+    layoutOptions: { template: 'icon-beside', alignment: 'center', spacing: 12 },
+    gradient: { type: 'linear', angle: 45, stops: [ { color: '#3b82f6', at: 0 }, { color: '#9333ea', at: 100 } ] },
+    iconOptions: {
+      family: 'abstract',
+      strokeWidth: 10,
+      cornerRadius: 8,
+      symmetry: 'none',
+      rotation: 0,
+      complexity: 'medium'
+    }
   })
 
   const [aiSuggestions, setAiSuggestions] = useState([])
@@ -180,22 +197,24 @@ const LogoCreator = () => {
       link.href = canvas.toDataURL('image/png')
       link.click()
     } else if (format === 'svg') {
-      // If an example template is selected, export the SVG from the renderer
+      const selected = EXAMPLE_TEMPLATES.find(t => t.id === exampleTemplateId)
+      if (selected && svgRef.current) {
+        exportSvgElement(svgRef.current, `logo-${logoData.companyName || 'brand'}.svg`, {
+          title: logoData.companyName || 'Logo',
+          description: logoData.tagline || 'Generated with CardGEN',
+          generator: 'CardGEN'
+        })
+      } else {
+        alert('Select an example SVG template to export as SVG.')
+      }
+    } else if (format === 'pdf') {
       const selected = EXAMPLE_TEMPLATES.find(t => t.id === exampleTemplateId)
       if (selected && svgRef.current) {
         const serializer = new XMLSerializer()
         const svgString = serializer.serializeToString(svgRef.current)
-        const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
-        const url = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `logo-${logoData.companyName || 'brand'}.svg`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
+        await exportPdfFromSvg(svgString, `logo-${logoData.companyName || 'brand'}.pdf`, { width: exportSize, height: exportSize })
       } else {
-        alert('Select an example SVG template to export as SVG.')
+        alert('Select an example SVG template to export as PDF.')
       }
     }
   }
@@ -323,7 +342,7 @@ const LogoCreator = () => {
           onChange={(val) => handleDesignChange('style', val)}
         />
 
-        <ExampleLogosDropdown
+        <ExampleLogosSearchDropdown
           value={exampleTemplateId}
           onChange={(id) => setExampleTemplateId(id)}
         />
@@ -333,6 +352,21 @@ const LogoCreator = () => {
           value={design.icon}
           onChange={(icon) => handleDesignChange('icon', icon)}
           onFocus={ensureLargeEmojiSet}
+        />
+
+        <IconControls
+          value={design.iconOptions}
+          onChange={(opts) => setDesign(prev => ({ ...prev, iconOptions: opts }))}
+        />
+
+        <LayoutControls
+          value={design.layoutOptions}
+          onChange={(opts) => setDesign(prev => ({ ...prev, layoutOptions: opts }))}
+        />
+
+        <GradientControls
+          value={design.gradient}
+          onChange={(g) => setDesign(prev => ({ ...prev, gradient: g }))}
         />
 
         <FontSelectDropdown
@@ -393,7 +427,15 @@ const LogoCreator = () => {
       <div className="creator-main animate-fade-up animate-delay-2">
         <div className="preview-sticky-wrap" style={{ marginBottom: 'var(--spacing-6)' }}>
           <h2>Logo Preview</h2>
-          <div className="logo-preview" id="logo-preview">
+          <div
+            className="logo-preview"
+            id="logo-preview"
+            style={{
+              background: design?.gradient?.stops?.length >= 2
+                ? `linear-gradient(${design.gradient.angle ?? 45}deg, ${design.gradient.stops.map(s => `${s.color} ${typeof s.at === 'number' ? s.at + '%' : ''}`).join(', ')})`
+                : undefined
+            }}
+          >
             <div style={{ textAlign: 'center' }}>
               {exampleTemplateId ? (
                 <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
@@ -405,6 +447,9 @@ const LogoCreator = () => {
                     primaryColor={design.primaryColor}
                     secondaryColor={design.secondaryColor}
                     font={design.font}
+                    iconOptions={design.iconOptions}
+                    layoutOptions={design.layoutOptions}
+                    gradient={design.gradient}
                   />
                 </div>
               ) : (
@@ -482,12 +527,23 @@ const LogoCreator = () => {
             </div>
           </div>
 
-          <div className="flex" style={{ gap: 'var(--spacing-3)', justifyContent: 'center' }}>
+          <div className="flex" style={{ gap: 'var(--spacing-3)', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="field-label" style={{ margin: 0, fontSize: 12 }}>PDF Size</label>
+              <select className="select" value={exportSize} onChange={(e) => setExportSize(Number(e.target.value))}>
+                <option value={256}>256 px</option>
+                <option value={512}>512 px</option>
+                <option value={1024}>1024 px</option>
+              </select>
+            </div>
             <button onClick={() => exportLogo('png')} className="btn btn-secondary">
               📸 Export PNG
             </button>
             <button onClick={() => exportLogo('svg')} className="btn btn-secondary">
               🎨 Export SVG
+            </button>
+            <button onClick={() => exportLogo('pdf')} className="btn btn-secondary">
+              📄 Export PDF
             </button>
           </div>
         </div>

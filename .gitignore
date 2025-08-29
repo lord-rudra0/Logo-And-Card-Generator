@@ -1,0 +1,52 @@
+.venv
+# Node.js
+**/node_modules/
+frontend/dist/
+backend/dist/
+**/build/
+frontend/.vite/
+
+# Python (ML service)
+ml/.venv/
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/.mypy_cache/
+**/.pytest_cache/
+**/.ruff_cache/
+
+# ML model cache (large files)
+ml/models/
+**/hf_cache/
+**/.cache/
+
+# Environment files
+.env
+.env.*      # e.g., .env.local
+**/.env
+**/.env.*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Caches/coverage
+.cache/
+coverage/
+.coverage*
+
+# Editors/OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Temp
+tmp/
+temp/
+*.sw?

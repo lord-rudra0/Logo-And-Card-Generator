@@ -4,6 +4,8 @@ import dotenv from 'dotenv'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import cardRoutes from './routes/cards.js'
 import logoRoutes from './routes/logos.js'
+import exportRoutes from './routes/export.js'
+import generateLogoRoutes from './routes/generateLogo.js'
 
 dotenv.config()
 
@@ -23,6 +25,8 @@ app.locals.genAI = genAI
 // Routes
 app.use('/api', cardRoutes)
 app.use('/api', logoRoutes)
+app.use('/api', exportRoutes)
+app.use('/api/generateLogo', generateLogoRoutes)
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
