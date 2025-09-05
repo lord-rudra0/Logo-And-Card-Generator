@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 
+// cache directory (backend/cache)
 const CACHE_DIR = path.resolve(new URL(import.meta.url).pathname, '..', 'cache')
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true })
 
@@ -21,6 +22,10 @@ export function saveBase64Image(dataUrl) {
 }
 
 export function getCacheUrl(filename) {
-  // Static serving base: /cache/
-  return `/cache/${filename}`
+  // Return an absolute URL so the frontend (dev server on a different origin)
+  // can fetch the cached image directly from the backend.
+  // Prefer BACKEND_URL env var, otherwise fall back to localhost with PORT.
+  const backendBase = (process.env.BACKEND_URL && process.env.BACKEND_URL.replace(/\/$/, '')) ||
+    `http://localhost:${process.env.PORT || 5000}`
+  return `${backendBase}/cache/${filename}`
 }

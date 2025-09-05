@@ -48,3 +48,5 @@ temp/
 .venv/
 
 scraped_images_bcards/
+ml/.env
+ml/sd-model/

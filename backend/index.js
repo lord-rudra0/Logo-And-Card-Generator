@@ -20,9 +20,13 @@ const genAI = null
 // Middleware
 app.use(cors())
 app.use(express.json())
-// serve cached generated images
+// serve cached generated images (store is under backend/services/cache)
 import path from 'path'
-app.use('/cache', express.static(path.join(process.cwd(), 'backend', 'cache')))
+// Resolve cache directory relative to this file so serving works regardless of
+// the working directory used to start the process.
+const __dirname = path.dirname(new URL(import.meta.url).pathname)
+const CACHE_SERVE_DIR = path.join(__dirname, 'services', 'cache')
+app.use('/cache', express.static(CACHE_SERVE_DIR))
 
 // Make genAI available to routes
 app.locals.genAI = genAI
