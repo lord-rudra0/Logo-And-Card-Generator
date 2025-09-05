@@ -27,6 +27,10 @@ import path from 'path'
 const __dirname = path.dirname(new URL(import.meta.url).pathname)
 const CACHE_SERVE_DIR = path.join(__dirname, 'services', 'cache')
 app.use('/cache', express.static(CACHE_SERVE_DIR))
+// serve stored logos
+const STORED_DIR = path.join(__dirname, '..', 'stored_logos')
+if (!fs.existsSync(STORED_DIR)) fs.mkdirSync(STORED_DIR, { recursive: true })
+app.use('/stored', express.static(STORED_DIR))
 
 // Make genAI available to routes
 app.locals.genAI = genAI

@@ -1,5 +1,6 @@
 import express from 'express'
 import { generateLogoDesign, generateLogoSVG } from '../services/aiService.js'
+import { storeCachedFile, storeDataUrl } from '../services/imageCache.js'
 
 const router = express.Router()
 
@@ -83,3 +84,28 @@ router.get('/logo-suggestions/:industry', (req, res) => {
 })
 
 export default router
+
+// Store a logo permanently (from cache filename or a data URL)
+router.post('/store-logo', async (req, res) => {
+  try {
+    const { source, filename, dataUrl } = req.body || {}
+    if (!source && !dataUrl && !filename) return res.status(400).json({ success: false, error: 'source or dataUrl or filename required' })
+    let url
+    if (filename) {
+      // store a cached file by filename
+      url = storeCachedFile(filename)
+    } else if (dataUrl) {
+      url = storeDataUrl(dataUrl, filename)
+    } else if (typeof source === 'string' && source.startsWith('/cache/')) {
+      // extract filename
+      const f = source.split('/').pop()
+      url = storeCachedFile(f)
+    } else {
+      return res.status(400).json({ success: false, error: 'unrecognized source format' })
+    }
+    res.json({ success: true, url })
+  } catch (err) {
+    console.error('store-logo error', err)
+    res.status(500).json({ success: false, error: String(err && err.message) })
+  }
+})
