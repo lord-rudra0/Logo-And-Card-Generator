@@ -10,16 +10,31 @@
 .cg-toast {
   min-width: 220px;
   max-width: 380px;
-  background: white;
+  background: var(--toast-bg, #ffffff);
+  color: var(--toast-fg, #111827);
   border-radius: 8px;
   box-shadow: 0 6px 18px rgba(0,0,0,0.08);
   overflow: hidden;
   border: 1px solid rgba(0,0,0,0.06);
 }
 .cg-toast-body { display:flex; gap:8px; align-items:center; padding:10px }
-.cg-toast-message { flex:1; font-size:14px; color:var(--text-primary) }
+.cg-toast-message { flex:1; font-size:14px; color:var(--toast-fg, #111827) }
 .cg-toast-success { border-left: 4px solid #10b981 }
 .cg-toast-error { border-left: 4px solid #ef4444 }
 .cg-toast-info { border-left: 4px solid #3b82f6 }
-.cg-toast-action { background: transparent; border: none; color: #2563eb; cursor: pointer; padding: 6px; font-size:13px }
-.cg-toast-close { background: transparent; border: none; color:#6b7280; cursor:pointer; font-size:16px }
+.cg-toast-action { background: transparent; border: none; color: var(--toast-action, #2563eb); cursor: pointer; padding: 6px; font-size:13px }
+.cg-toast-close { background: transparent; border: none; color:var(--toast-close, #6b7280); cursor:pointer; font-size:16px }
+
+/* Dark theme overrides */
+.dark .cg-toast {
+  --toast-bg: #0b1220; /* dark card background */
+  --toast-fg: #e6eef8; /* light text */
+  --toast-action: #9ad3ff;
+  --toast-close: #9ca3af;
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 8px 24px rgba(2,6,23,0.6);
+}
+
+/* Ensure links and actions are readable on both themes */
+.cg-toast-action:hover { text-decoration: underline }
+.cg-toast-close:focus { outline: 2px solid rgba(99,102,241,0.25); border-radius:4px }
