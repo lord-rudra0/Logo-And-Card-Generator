@@ -6,24 +6,27 @@ import CardCreator from './pages/CardCreator'
 import LogoCreator from './pages/LogoCreator'
 import HowToUse from './pages/HowToUse'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { ToastProvider } from './context/ToastContext'
 import './App.css'
 
 function App() {
   return (
     <ThemeProvider>
-      <Router>
-        <div className="app">
-          <Header />
-          <main>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/cards" element={<CardCreator />} />
-              <Route path="/logos" element={<LogoCreator />} />
-              <Route path="/how-to-use" element={<HowToUse />} />
-            </Routes>
-          </main>
-        </div>
-      </Router>
+      <ToastProvider>
+        <Router>
+          <div className="app">
+            <Header />
+            <main>
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/cards" element={<CardCreator />} />
+                <Route path="/logos" element={<LogoCreator />} />
+                <Route path="/how-to-use" element={<HowToUse />} />
+              </Routes>
+            </main>
+          </div>
+        </Router>
+      </ToastProvider>
     </ThemeProvider>
   )
 }

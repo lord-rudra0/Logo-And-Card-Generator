@@ -3,10 +3,9 @@ uvicorn[standard]>=0.20
 pydantic>=1.10
 Pillow>=9.0
 pytesseract>=0.3
-"""
-ML requirements removed
-
-This requirements.txt previously listed Python dependencies for the local
-ML service. The ML service has been removed from the repository.
-"""
-# torch==2.3.1
+httpx>=0.24
+diffusers>=0.19.0
+transformers>=4.30.0
+torch>=2.0.0
+accelerate>=0.20.3
+safetensors>=0.3.0

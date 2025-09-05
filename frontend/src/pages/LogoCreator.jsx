@@ -24,6 +24,7 @@ import { exportPdfFromSvg } from '../utils/pdfExport.js'
 import { recommendStyleAPI } from '../utils/mlApi.js'
 import OCRPanel from '../components/OCRPanel.jsx'
 import AccessibilityPanel from '../components/AccessibilityPanel.jsx'
+import LogoGeneratorPanel from '../components/LogoGeneratorPanel.jsx'
 // Text-to-image feature removed
 
 const LogoCreator = () => {
@@ -647,6 +648,7 @@ const LogoCreator = () => {
         }} />
 
         <AccessibilityPanel />
+  <LogoGeneratorPanel />
 
         <div className="form-group">
           <label className="form-label">Initials (Optional)</label>

@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { ocrAPI } from '../utils/mlApi.js'
+import { useToast } from '../context/ToastContext'
 
 export default function OCRPanel({ onResult }) {
   const [fileName, setFileName] = useState('')
   const [isWorking, setIsWorking] = useState(false)
+  const toast = useToast()
 
   const handleFile = async (file) => {
     if (!file) return
     setFileName(file.name)
     try {
+      toast.info('Scanning image...')
       setIsWorking(true)
       const reader = new FileReader()
       reader.onload = async (e) => {
@@ -17,11 +20,12 @@ export default function OCRPanel({ onResult }) {
         const base64 = dataUrl.split(',')[1]
         const res = await ocrAPI(`data:image/png;base64,${base64}`)
         if (onResult) onResult(res)
+        toast.success('OCR complete')
       }
       reader.readAsDataURL(file)
     } catch (err) {
       console.error('OCR failed', err)
-      alert('OCR failed: ' + (err.message || err))
+      toast.error('OCR failed: ' + (err.message || err))
     } finally {
       setIsWorking(false)
     }

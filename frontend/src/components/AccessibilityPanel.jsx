@@ -1,20 +1,24 @@
 import { useState } from 'react'
 import { checkAccessibilityAPI } from '../utils/mlApi.js'
+import { useToast } from '../context/ToastContext'
 
 export default function AccessibilityPanel() {
   const [elementsJson, setElementsJson] = useState('[{"id":"title","textColor":"#ffffff","bgColor":"#3b82f6","fontSize":24}]')
   const [report, setReport] = useState(null)
   const [isRunning, setIsRunning] = useState(false)
+  const toast = useToast()
 
   const runCheck = async () => {
     try {
+  toast.info('Running accessibility check...')
       setIsRunning(true)
       const elements = JSON.parse(elementsJson)
       const res = await checkAccessibilityAPI(elements)
       setReport(res)
+  toast.success('Accessibility check complete')
     } catch (err) {
       console.error('Accessibility check failed', err)
-      alert('Accessibility check failed: ' + (err.message || err))
+  toast.error('Accessibility check failed: ' + (err.message || err))
     } finally {
       setIsRunning(false)
     }

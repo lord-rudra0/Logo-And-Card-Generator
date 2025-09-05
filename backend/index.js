@@ -20,6 +20,9 @@ const genAI = null
 // Middleware
 app.use(cors())
 app.use(express.json())
+// serve cached generated images
+import path from 'path'
+app.use('/cache', express.static(path.join(process.cwd(), 'backend', 'cache')))
 
 // Make genAI available to routes
 app.locals.genAI = genAI

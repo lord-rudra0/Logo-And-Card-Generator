@@ -1,6 +1,8 @@
 import express from 'express'
 import fetch from 'node-fetch'
 import { recommendStyle, checkAccessibility, ocrFromImageBase64 } from '../services/mlService.js'
+import { saveBase64Image, getCacheUrl } from '../services/imageCache.js'
+import { createJob, getJob } from '../services/jobQueue.js'
 
 const router = express.Router()
 
@@ -74,6 +76,72 @@ router.post('/ocr', async (req, res) => {
     res.json({ success: true, ocr: result })
   } catch (err) {
     console.error('ocr error', err)
+    res.status(500).json({ success: false, error: String(err && err.message) })
+  }
+})
+
+// POST /api/ml/generate-logo
+router.post('/generate-logo', async (req, res) => {
+  try {
+    const payload = req.body || {}
+    // support async job creation: ?async=true
+    const wantAsync = req.query && String(req.query.async) === 'true'
+    if (wantAsync) {
+      const job = createJob(async (updateProgress) => {
+        // runner: proxy to python (if configured) then save images
+        if (!PY_ML_URL) throw new Error('Python ML service not configured')
+        // preliminary progress
+        updateProgress(5)
+        const data = await proxyToPython('generate/logo', payload)
+        updateProgress(60)
+        const imgs = data.images || data.generated_images || []
+        const saved = imgs.map((d) => {
+          try {
+            const { filename } = saveBase64Image(d)
+            return { url: getCacheUrl(filename), cached: true }
+          } catch (e) {
+            return { url: d, cached: false }
+          }
+        })
+        updateProgress(95)
+        return { raw: data, images: saved }
+      })
+      return res.json({ success: true, jobId: job.id })
+    }
+    if (PY_ML_URL) {
+      try {
+        const data = await proxyToPython('generate/logo', payload)
+        // if data contains data.images or images as data URLs, save them to cache and return URLs
+        const imgs = data.images || data.generated_images || []
+        const saved = imgs.map((d) => {
+          try {
+            const { filename } = saveBase64Image(d)
+            return { url: getCacheUrl(filename), cached: true }
+          } catch (e) {
+            return { url: d, cached: false }
+          }
+        })
+        return res.json({ success: true, data: { raw: data, images: saved } })
+      } catch (e) {
+        console.warn('Python ML proxy failed for generate-logo, error:', e.message)
+      }
+    }
+    return res.status(501).json({ success: false, error: 'Logo generation not available: configure Python ML service with HF token' })
+  } catch (err) {
+    console.error('generate-logo error', err)
+    res.status(500).json({ success: false, error: String(err && err.message) })
+  }
+})
+
+// GET /api/ml/job/:id
+router.get('/job/:id', async (req, res) => {
+  try {
+    const id = req.params.id
+    const job = getJob(id)
+    if (!job) return res.status(404).json({ success: false, error: 'job not found' })
+    res.json({ success: true, job: { id: job.id, status: job.status, progress: job.progress, error: job.error, result: job.result } })
+  } catch (err) {
+    console.error('job status error', err)
     res.status(500).json({ success: false, error: String(err && err.message) })
   }
 })
