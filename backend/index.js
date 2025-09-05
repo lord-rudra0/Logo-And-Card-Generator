@@ -5,6 +5,7 @@ import dotenv from 'dotenv'
 import cardRoutes from './routes/cards.js'
 import logoRoutes from './routes/logos.js'
 import exportRoutes from './routes/export.js'
+import mlRoutes from './routes/ml.js'
 // generateLogo and textToImage routes removed
 
 dotenv.config()
@@ -27,6 +28,7 @@ app.locals.genAI = genAI
 app.use('/api', cardRoutes)
 app.use('/api', logoRoutes)
 app.use('/api', exportRoutes)
+app.use('/api/ml', mlRoutes)
 // Note: ML proxy routes removed
 
 // Simple health check

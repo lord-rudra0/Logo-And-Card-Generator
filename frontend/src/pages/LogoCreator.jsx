@@ -21,6 +21,9 @@ import { exportSvgElement } from '../utils/svgExport.js'
 import LayoutControls from '../components/LayoutControls.jsx'
 import GradientControls from '../components/GradientControls.jsx'
 import { exportPdfFromSvg } from '../utils/pdfExport.js'
+import { recommendStyleAPI } from '../utils/mlApi.js'
+import OCRPanel from '../components/OCRPanel.jsx'
+import AccessibilityPanel from '../components/AccessibilityPanel.jsx'
 // Text-to-image feature removed
 
 const LogoCreator = () => {
@@ -328,6 +331,30 @@ const LogoCreator = () => {
           >
             {isGenerating ? '🤖 Generating...' : '✨ Generate AI Logo'}
           </button>
+          <button
+            onClick={async () => {
+              try {
+                setIsGenerating(true)
+                const rec = await recommendStyleAPI({ industry: logoData.industry, mood: 'professional' })
+                if (rec && rec.palette) {
+                  setDesign(prev => ({ ...prev, primaryColor: rec.palette.primary, secondaryColor: rec.palette.secondary }))
+                }
+                if (rec && rec.fonts) {
+                  setDesign(prev => ({ ...prev, font: `${rec.fonts.heading}, system-ui, -apple-system` }))
+                }
+              } catch (e) {
+                console.error('Recommend style failed', e)
+                alert('Recommend style failed: ' + (e.message || e))
+              } finally {
+                setIsGenerating(false)
+              }
+            }}
+            className="btn btn-secondary"
+            style={{ width: '100%' }}
+            disabled={isGenerating}
+          >
+            {isGenerating ? '⏳ Applying...' : '🎨 Recommend Style'}
+          </button>
           <button 
             onClick={autoStyleWithAI} 
             className="btn btn-secondary" 
@@ -605,6 +632,21 @@ const LogoCreator = () => {
             placeholder="Your Company"
           />
         </div>
+
+        <OCRPanel onResult={(res) => {
+          if (res && res.text) {
+            // try to auto-fill company name if not present
+            const lines = (res.text || '').split(/\n+/).map(l => l.trim()).filter(Boolean)
+            if (lines && lines.length > 0) {
+              setLogoData(prev => ({ ...prev, companyName: prev.companyName || lines[0] }))
+            }
+            alert('OCR result: ' + (res.text || JSON.stringify(res)))
+          } else if (res && res.error) {
+            alert('OCR: ' + res.error)
+          }
+        }} />
+
+        <AccessibilityPanel />
 
         <div className="form-group">
           <label className="form-label">Initials (Optional)</label>
