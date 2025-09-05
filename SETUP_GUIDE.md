@@ -19,79 +19,9 @@ cd CardGEN
 cd /path/to/CardGEN
 ```
 
-## 2. ML Service Setup (Python FastAPI)
+## 2. ML Service (removed)
 
-### Create Virtual Environment
-```bash
-cd ml
-python3 -m venv .venv
-source .venv/bin/activate  # On Linux/Mac
-# .venv\Scripts\activate   # On Windows
-```
-
-### Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### Download Stable Diffusion Models for Local Generation
-
-#### Option 1: Automatic Download (Recommended)
-Models download automatically on first use. Just set the backend:
-```bash
-export GEN_BACKEND=local
-```
-
-#### Option 2: Manual Pre-download
-To download models beforehand, uncomment the heavy dependencies in `ml/requirements.txt`:
-```bash
-# Edit ml/requirements.txt - uncomment these lines:
-torch==2.3.1
-torchvision==0.18.1
-diffusers==0.30.0
-transformers==4.43.3
-safetensors==0.4.3
-open-clip-torch==2.24.0
-
-# Install the ML dependencies
-pip install -r requirements.txt
-```
-
-#### Option 3: Download via Python Script
-Create a download script `ml/download_models.py`:
-```python
-from diffusers import StableDiffusionPipeline
-import torch
-
-# Download Stable Diffusion 1.5
-pipe = StableDiffusionPipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5",
-    torch_dtype=torch.float16,
-    cache_dir="./models/hf_cache"
-)
-print("Models downloaded to ml/models/hf_cache/")
-```
-
-Run the download:
-```bash
-cd ml
-python download_models.py
-```
-
-Models will be cached in `ml/models/hf_cache/hub/models--runwayml--stable-diffusion-v1-5/`
-
-### Start ML Service
-```bash
-# From repo root (important for imports)
-cd /home/rudra_thakur/Downloads/CardGEN
-ml/.venv/bin/python -m uvicorn ml.server:app --reload --port 8000
-```
-
-### Verify ML Service
-```bash
-curl http://127.0.0.1:8000/openapi.json
-# Or open http://127.0.0.1:8000/docs in browser
-```
+The local Python-based ML service (Stable Diffusion / FastAPI) has been removed from this repository. ML-related features such as local text-to-image and hosted model proxies are disabled. The codebase now contains lightweight, non-ML fallbacks so the frontend and backend continue to function without heavy ML dependencies.
 
 ## 3. Backend API Setup (Node.js Express)
 
@@ -181,23 +111,8 @@ git push origin main
 
 ## 6. Running All Services Step by Step
 
-### Step 1: Start ML Service (Terminal 1)
-```bash
-# Navigate to project root
-cd /home/rudra_thakur/Downloads/CardGEN
-
-# Activate virtual environment (if not already active)
-source ml/.venv/bin/activate
-
-# Set backend type (optional - defaults to placeholder)
-export GEN_BACKEND=local  # or 'hosted' or 'placeholder'
-
-# Start ML service
-ml/.venv/bin/python -m uvicorn ml.server:app --reload --port 8000
-
-# You should see:
-# INFO: Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-```
+### Step 1: (ML removed)
+The ML service step has been removed. Proceed to start the backend and frontend as described below.
 
 ### Step 2: Start Backend API (Terminal 2)
 ```bash
@@ -234,15 +149,10 @@ npm run dev
 # ➜  Network: use --host to expose
 ```
 
-### Step 4: Verify All Services Are Running
+### Step 4: Verify Backend & Frontend
 ```bash
-# Test ML service (Terminal 4 or new terminal)
-curl http://127.0.0.1:8000/docs
-# Should return HTML for FastAPI docs
-
 # Test backend API
 curl http://localhost:5000/api/health
-# Should return: {"status":"OK","message":"AI Card Creator API is running!"}
 
 # Test frontend
 # Open browser to http://localhost:5173
@@ -251,11 +161,8 @@ curl http://localhost:5000/api/health
 
 ## 7. Verification
 
-### Check All Services
+### Check Backend and Frontend
 ```bash
-# ML Service
-curl http://127.0.0.1:8000/docs
-
 # Backend API
 curl http://localhost:5000/api/health
 
@@ -263,46 +170,19 @@ curl http://localhost:5000/api/health
 # Open http://localhost:5173 in browser
 ```
 
-### Test Logo Generation
-```bash
-curl -s http://127.0.0.1:8000/generate/logo \
-  -H 'Content-Type: application/json' \
-  -d '{"description":"modern blue tech logo", "count":2, "width":256, "height":256}'
-```
+### Test Logo Generation (fallback)
+Logo generation via the previous ML service is no longer available. The backend provides non-ML placeholder/logo helpers; use the web UI or API endpoints under `/api/logos` and `/api/cards` for design features.
 
 ## 8. Configuration Options
 
-### ML Service Backends
-Set environment variables before starting ML service:
-
-#### For Hosted Generation (Replicate)
-```bash
-export GEN_BACKEND=hosted
-export REPLICATE_API_TOKEN=your_token_here
-export REPLICATE_VERSION=your_model_version_hash
-```
-
-#### For Local Generation
-```bash
-export GEN_BACKEND=local
-# Models download automatically to ml/models/hf_cache/
-```
-
-#### For Placeholder Only
-```bash
-export GEN_BACKEND=placeholder
-# No external dependencies needed
-```
+*ML configuration options were removed with the ML service.*
 
 ## Troubleshooting
 
 ### Common Issues
 
 1. **ModuleNotFoundError: No module named 'ml'**
-   - Run uvicorn from repo root, not from `ml/` directory
-
-2. **ModuleNotFoundError: No module named 'httpx'**
-   - Install missing dependency: `pip install httpx`
+   - The ML service has been removed; references to `ml/` are no longer valid.
 
 3. **Git index.lock error**
    - Remove lock file: `rm -f .git/index.lock`
@@ -323,11 +203,7 @@ CardGEN/
 ├── frontend/         # React + Vite UI
 │   ├── src/
 │   └── package.json
-├── ml/              # Python FastAPI ML service
-│   ├── .venv/       # Virtual environment
-│   ├── models/      # Model cache (gitignored)
-│   ├── requirements.txt
-│   └── server.py
+```
 └── .gitignore       # Ignores models, .env, node_modules
 ```
 

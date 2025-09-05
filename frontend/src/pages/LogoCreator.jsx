@@ -21,7 +21,7 @@ import { exportSvgElement } from '../utils/svgExport.js'
 import LayoutControls from '../components/LayoutControls.jsx'
 import GradientControls from '../components/GradientControls.jsx'
 import { exportPdfFromSvg } from '../utils/pdfExport.js'
-import TextToImageGenerator from '../components/TextToImageGenerator.jsx'
+// Text-to-image feature removed
 
 const LogoCreator = () => {
   const [logoData, setLogoData] = useState({
@@ -589,10 +589,7 @@ const LogoCreator = () => {
           />
         </div>
 
-        {/* Text-to-Image Generator */}
-        <div style={{ marginTop: 'var(--spacing-6)' }}>
-          <TextToImageGenerator />
-        </div>
+  {/* Text-to-Image Generator removed: feature disabled in this build */}
       </div>
 
       <div className="creator-sidebar animate-fade-up animate-delay-3">

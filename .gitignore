@@ -6,8 +6,7 @@ backend/dist/
 **/build/
 frontend/.vite/
 
-# Python (ML service)
-ml/.venv/
+# Python caches
 **/.venv/
 **/__pycache__/
 **/*.py[cod]
@@ -15,11 +14,6 @@ ml/.venv/
 **/.mypy_cache/
 **/.pytest_cache/
 **/.ruff_cache/
-
-# ML model cache (large files)
-ml/models/
-**/hf_cache/
-**/.cache/
 
 # Environment files
 .env
