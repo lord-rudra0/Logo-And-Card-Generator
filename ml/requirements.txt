@@ -1,0 +1,7 @@
+"""
+ML requirements removed
+
+This requirements.txt previously listed Python dependencies for the local
+ML service. The ML service has been removed from the repository.
+"""
+# torch==2.3.1
