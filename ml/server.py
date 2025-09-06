@@ -5,7 +5,13 @@ import math
 import os
 import base64
 import httpx
+import httpcore
 import asyncio
+
+# Stability.ai fallback configuration (set STABILITY_API_KEY in environment; do NOT hardcode keys)
+STABILITY_API_KEY = os.environ.get('STABILITY_API_KEY')
+STABILITY_MODEL = os.environ.get('STABILITY_MODEL', 'stable-diffusion-v1')
+HF_FALLBACK_AFTER = float(os.environ.get('HF_FALLBACK_AFTER', 60.0))
 
 # Load environment from ml/.env if present. Attempts to use python-dotenv first,
 # and falls back to a simple parser if python-dotenv isn't installed.
@@ -268,7 +274,8 @@ async def generate_logo(req: GenerateLogoRequest):
             img_bytes = await asyncio.to_thread(_generate_local_image_sync, req.prompt, steps, high_noise_frac, req.width, req.height, os.environ.get('LOCAL_DEVICE','cuda'))
             b64 = base64.b64encode(img_bytes).decode('utf-8')
             data_url = f'data:image/png;base64,{b64}'
-            return { 'images': [data_url] }
+            print('Returning image from local diffusers')
+            return { 'images': [data_url], 'source': 'local' }
         except Exception as e:
             # If local generation fails, surface informative error and fall back to HF inference path below
             raise HTTPException(status_code=500, detail='Local diffusion failed: ' + str(e))
@@ -291,30 +298,144 @@ async def generate_logo(req: GenerateLogoRequest):
         }
     }
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        r = await client.post(url, headers=headers, json=payload)
-        if r.status_code != 200:
-            # Try to surface error
+    # Resilient HF call with timeout, retries and mapped errors
+    # HF_REQUEST_TIMEOUT may be a float (seconds) or a sentinel value to
+    # indicate "no timeout" (for example during a long cold-start). We
+    # accept values: 'none', 'infinite', '0' (or any <= 0) to disable the
+    # total/read timeout. Keep a reasonable connect timeout.
+    hf_timeout_raw = os.environ.get('HF_REQUEST_TIMEOUT', '180')
+    try:
+        raw = str(hf_timeout_raw).strip().lower()
+        if raw in ('none', 'infinite', 'null') or raw == '' or float(raw) <= 0:
+            hf_total = None
+            hf_read = None
+        else:
+            hf_total = float(raw)
+            hf_read = float(raw)
+    except Exception:
+        # fallback to sensible default
+        hf_total = 180.0
+        hf_read = 180.0
+
+    max_retries = int(os.environ.get('HF_MAX_RETRIES', 3))
+    backoff_base = float(os.environ.get('HF_BACKOFF_BASE', 1.5))
+
+    # Use keyword args so we can pass None to disable read/total timeouts.
+    timeout = httpx.Timeout(timeout=hf_total, connect=10.0, read=hf_read, write=30.0)
+    last_exc = None
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for attempt in range(1, max_retries + 1):
             try:
-                data = r.json()
-                raise HTTPException(status_code=502, detail=str(data))
-            except Exception:
-                raise HTTPException(status_code=502, detail=f'HF inference error: {r.status_code}')
+                print(f"HF attempt {attempt}/{max_retries} for model {model} (prompt len={len(req.prompt or '')})")
+                # Respect an initial fallback threshold: if HF takes longer than
+                # HF_FALLBACK_AFTER seconds (read timeout), treat as a timeout and
+                # attempt the Stability.ai fallback if configured.
+                # We'll perform the POST with the same client but rely on the
+                # client's configured read timeout.
+                r = await client.post(url, headers=headers, json=payload)
 
-        content_type = r.headers.get('content-type', '')
-        if content_type.startswith('application/json'):
-            data = r.json()
-            # some HF image endpoints return json with base64 in 'generated_images' or error
-            if isinstance(data, dict) and 'error' in data:
-                raise HTTPException(status_code=502, detail=data['error'])
-            # otherwise return the json directly
-            return data
+                # surface transient HF statuses as retryable (include 504)
+                if r.status_code in (429, 502, 503, 504, 524):
+                    # capture response text for diagnostics (may be truncated)
+                    try:
+                        resp_text = r.text[:1000]
+                    except Exception:
+                        resp_text = '<unavailable>'
+                    last_exc = Exception(f'Transient HF status {r.status_code}: {resp_text}')
+                    if attempt < max_retries:
+                        wait = backoff_base ** attempt
+                        print(f"Transient HF status {r.status_code}, retrying in {wait}s; resp_excerpt={resp_text}")
+                        await asyncio.sleep(wait)
+                        continue
+                    raise HTTPException(status_code=502, detail=f'HuggingFace transient error: {r.status_code}')
 
-        # Assume binary image content
-        img_bytes = r.content
-        b64 = base64.b64encode(img_bytes).decode('utf-8')
-        data_url = f'data:image/png;base64,{b64}'
-        return { 'images': [data_url] }
+                if r.status_code != 200:
+                    try:
+                        data = r.json()
+                        raise HTTPException(status_code=502, detail=str(data))
+                    except Exception:
+                        raise HTTPException(status_code=502, detail=f'HF inference error: {r.status_code}')
+
+                content_type = r.headers.get('content-type', '')
+                if content_type.startswith('application/json'):
+                    data = r.json()
+                    if isinstance(data, dict) and 'error' in data:
+                        raise HTTPException(status_code=502, detail=data['error'])
+                    # Best-effort: log and mark source for JSON responses
+                    print('Returning JSON response from Hugging Face (application/json)')
+                    if isinstance(data, dict):
+                        data.setdefault('source', 'huggingface')
+                    return data
+
+                img_bytes = r.content
+                b64 = base64.b64encode(img_bytes).decode('utf-8')
+                data_url = f'data:image/png;base64,{b64}'
+                print('Returning image from Hugging Face')
+                return { 'images': [data_url], 'source': 'huggingface' }
+
+            except (httpx.ReadTimeout, httpcore.ReadTimeout) as e:
+                last_exc = e
+                print(f"HF read timeout on attempt {attempt}: {e}")
+                # If a Stability.ai API key is available, try fallback generation.
+                if STABILITY_API_KEY:
+                    try:
+                        print("Attempting Stability.ai fallback...")
+                        # call stability fallback with reasonable internal timeout
+                        async def _stability_call():
+                            s_url = f'https://api.stability.ai/v1/generation/{STABILITY_MODEL}/text-to-image'
+                            s_headers = {
+                                'Authorization': f'Bearer {STABILITY_API_KEY}',
+                                'Content-Type': 'application/json'
+                            }
+                            s_payload = {
+                                'text_prompts': [{ 'text': req.prompt }],
+                                'width': req.width or 512,
+                                'height': req.height or 512,
+                                'steps': req.steps or 20,
+                                'samples': 1,
+                                'cfg_scale': req.guidance_scale or 7.5
+                            }
+                            # give Stability a generous timeout
+                            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as sclient:
+                                sr = await sclient.post(s_url, headers=s_headers, json=s_payload)
+                                if sr.status_code not in (200, 201):
+                                    raise Exception(f'Stability API error: {sr.status_code} {sr.text[:500]}')
+                                data = sr.json()
+                                # extract base64 artifact (defensive)
+                                b64 = None
+                                if isinstance(data, dict):
+                                    arts = data.get('artifacts') or data.get('artifacts', [])
+                                    if arts and isinstance(arts, list):
+                                        art0 = arts[0]
+                                        b64 = art0.get('base64') or art0.get('b64') or art0.get('b64_data')
+                                if not b64:
+                                    # try common alternative key
+                                    try:
+                                        # some responses encode base64 in nested fields
+                                        b64 = data['artifacts'][0]['base64']
+                                    except Exception:
+                                        raise Exception('Unexpected Stability response payload: ' + str(data)[:500])
+                                data_url = f'data:image/png;base64,{b64}'
+                                return { 'images': [data_url] }
+
+                        stability_result = await _stability_call()
+                        return stability_result
+                    except Exception as se:
+                        print(f"Stability fallback failed: {se}")
+                        last_exc = se
+                        # fall through to retry logic / final failure
+                if attempt < max_retries:
+                    wait = backoff_base ** attempt
+                    await asyncio.sleep(wait)
+                    continue
+                raise HTTPException(status_code=504, detail=f'HuggingFace request timed out after {max_retries} attempts; last_err={str(last_exc)[:300]}')
+            except httpx.HTTPError as e:
+                last_exc = e
+                print(f"HF HTTPError: {e}")
+                raise HTTPException(status_code=502, detail=f'Error contacting HuggingFace inference API: {str(e)}')
+
+        # exhausted retries
+        raise HTTPException(status_code=502, detail=f'HuggingFace inference failed: {str(last_exc)}')
 """
 ML service removed
 
