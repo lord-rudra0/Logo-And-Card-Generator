@@ -449,35 +449,7 @@ const LogoCreator = () => {
           value={design.shape}
           onChange={(shape) => handleDesignChange('shape', shape)}
         />
-        {/* If the panel is on the left, render the job panel here to avoid overlay */}
-        {jobModalOpen && panelSide === 'left' && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>AI Generation</div>
-            <div style={{ marginTop: 8 }}>
-              <div style={{ height: 8, background: 'var(--bg-tertiary)', borderRadius: 8, overflow: 'hidden' }}>
-                <div style={{ width: (jobProgress || 0) + '%', height: '100%', background: 'linear-gradient(90deg,#60a5fa,#06b6d4)' }} />
-              </div>
-              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>{jobProgress}%</div>
-            </div>
-            <div style={{ marginTop: 8 }}>
-              {(jobImages && jobImages.length) ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {jobImages.map((it, i) => (
-                    <div key={i} style={{ border: '1px solid var(--border-color)', borderRadius: 6, overflow: 'hidden', background: 'white' }}>
-                      <img src={it.url} alt={`job-${i}`} style={{ width: '100%', height: 80, objectFit: 'cover', cursor: 'pointer' }} onClick={() => setLightboxImage(it.url)} />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Waiting for images...</div>
-              )}
-            </div>
-            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-              <button className="btn btn-primary" onClick={() => { if (jobImages && jobImages[0] && jobImages[0].url) setGeneratedImageUrl(jobImages[0].url) }}>Apply to preview</button>
-              <button className="btn btn-secondary" onClick={() => setJobModalOpen(false)}>Close</button>
-            </div>
-          </div>
-        )}
+  {/* Job UI intentionally removed: backend job logic kept but no placeholder cards are shown here. */}
       </div>
 
       <div className="creator-main animate-fade-up animate-delay-2">
@@ -648,56 +620,7 @@ const LogoCreator = () => {
           />
         </div>
 
-        {/* If jobModalOpen, render floating job panel overlay inside main so it sits above templates */}
-        {jobModalOpen && (
-          <div className="job-panel" style={{ right: panelSide === 'right' ? 12 : 'auto', left: panelSide === 'left' ? 12 : 'auto', width: panelWidth }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>Generating logo</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Job: {jobId}</div>
-              </div>
-              <div>
-                <button className="btn btn-ghost" onClick={() => setPanelSide(prev => prev === 'right' ? 'left' : 'right')} title="Move panel to other side" style={{ padding: '6px 8px', borderRadius: 6 }}>Move</button>
-                <button className="btn btn-secondary" onClick={() => { setJobModalOpen(false) }} style={{ padding: '6px 8px', borderRadius: 6 }}>Close</button>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              <div style={{ height: 10, background: 'var(--bg-tertiary)', borderRadius: 8, overflow: 'hidden' }}>
-                <div style={{ width: (jobProgress || 0) + '%', height: '100%', background: 'linear-gradient(90deg,#60a5fa,#06b6d4)' }} />
-              </div>
-              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>{jobProgress}%</div>
-            </div>
-            <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="btn btn-primary" onClick={() => { if (jobImages && jobImages[0] && jobImages[0].url) setGeneratedImageUrl(jobImages[0].url) }} style={{ padding: '6px 8px', borderRadius: 6 }}>Apply to preview</button>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Width</label>
-                <input type="number" value={panelWidth} onChange={(e) => setPanelWidth(Math.max(260, Math.min(900, Number(e.target.value) || 420)))} style={{ width: 80 }} />
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              {(jobImages && jobImages.length) ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {jobImages.map((it, i) => (
-                    <div key={i} style={{ border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden', background: 'white', display: 'flex', flexDirection: 'column' }}>
-                      <img src={it.url} alt={`job-${i}`} style={{ width: '100%', height: 120, objectFit: 'cover', cursor: 'pointer' }} onClick={() => setLightboxImage(it.url)} />
-                      <div style={{ padding: 8, display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{it.cached ? 'Cached' : 'Raw'}</div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button className="btn btn-secondary" onClick={() => { const a = document.createElement('a'); a.href = it.url; a.download = `logo-${logoData.companyName || 'brand'}-${i+1}.png`; a.click() }} style={{ padding: '6px 8px', borderRadius: 6 }}>Download</button>
-                          <button className="btn btn-secondary" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(it.url); alert('Image URL copied') }} style={{ padding: '6px 8px', borderRadius: 6 }}>Share</button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ color: 'var(--text-secondary)' }}>Waiting for images...</div>
-              )}
-            </div>
-          </div>
-        )}
+  {/* Job panel overlay removed: generation still happens but no UI placeholder is shown here. */}
 
   {/* Text-to-Image Generator removed: feature disabled in this build */}
       </div>
@@ -869,62 +792,7 @@ const LogoCreator = () => {
   {/* Company initials, tagline and industry are handled inside the company-details-card above */}
 
         {/* Sidebar reserved for textual details only */}
-        {/* Job results panel - rendered inline in the sidebar so it doesn't overlay the left tools */}
-        {jobModalOpen && (
-          <div className="job-panel" style={{ marginTop: 12, border: '1px solid var(--border-color)', padding: 12, borderRadius: 8, background: 'var(--bg-secondary)', width: panelWidth }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>Generating logo</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Job: {jobId}</div>
-              </div>
-              <div>
-                <button className="btn btn-ghost" onClick={() => setPanelSide(prev => prev === 'right' ? 'left' : 'right')} title="Move panel to other side" style={{ padding: '6px 8px', borderRadius: 6 }}>Move</button>
-                <button className="btn btn-secondary" onClick={() => { setJobModalOpen(false) }} style={{ padding: '6px 8px', borderRadius: 6 }}>Close</button>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              <div style={{ height: 10, background: 'var(--bg-tertiary)', borderRadius: 8, overflow: 'hidden' }}>
-                <div style={{ width: (jobProgress || 0) + '%', height: '100%', background: 'linear-gradient(90deg,#60a5fa,#06b6d4)' }} />
-              </div>
-              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>{jobProgress}%</div>
-            </div>
-            <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="btn btn-primary" onClick={() => {
-                // apply first image to preview
-                if (jobImages && jobImages[0] && jobImages[0].url) {
-                  setGeneratedImageUrl(jobImages[0].url)
-                }
-              }}>Apply to preview</button>
-              
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Width</label>
-                <input type="number" value={panelWidth} onChange={(e) => setPanelWidth(Math.max(260, Math.min(900, Number(e.target.value) || 420)))} style={{ width: 80 }} />
-              </div>
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              {(jobImages && jobImages.length) ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {jobImages.map((it, i) => (
-                    <div key={i} style={{ border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden', background: 'white', display: 'flex', flexDirection: 'column' }}>
-                      <img src={it.url} alt={`job-${i}`} style={{ width: '100%', height: 120, objectFit: 'cover', cursor: 'pointer' }} onClick={() => setLightboxImage(it.url)} />
-                      <div style={{ padding: 8, display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{it.cached ? 'Cached' : 'Raw'}</div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button className="btn btn-secondary" onClick={() => { const a = document.createElement('a'); a.href = it.url; a.download = `logo-${logoData.companyName || 'brand'}-${i+1}.png`; a.click() }} style={{ padding: '6px 8px', borderRadius: 6 }}>Download</button>
-                          <button className="btn btn-secondary" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(it.url); alert('Image URL copied') }} style={{ padding: '6px 8px', borderRadius: 6 }}>Share</button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ color: 'var(--text-secondary)' }}>Waiting for images...</div>
-              )}
-            </div>
-          </div>
-        )}
+  {/* Sidebar job results removed: no inline job cards shown in the sidebar. */}
 
         {/* Lightbox overlay */}
         {lightboxImage && (
