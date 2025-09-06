@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import html2canvas from 'html2canvas'
 import PrebuiltLogosGrid from '../components/PrebuiltLogosGrid.jsx'
+import Loader from '../components/Loader.jsx'
 import IconsDropdown from '../components/IconsDropdown.jsx'
 import PREBUILT_LOGO_TEMPLATES from '../data/logoTemplates.js'
 import EMOJI_ICONS from '../data/emojiIcons.js'
@@ -115,31 +116,33 @@ const LogoCreator = () => {
       return
     }
 
-    setIsGenerating(true)
-    
-    try {
-      const req = buildLogoRequestFromState({
-        companyName: logoData.companyName,
-        industry: logoData.industry,
-        initials: logoData.initials,
-        tagline: logoData.tagline,
-        primaryColor: design.primaryColor,
-        secondaryColor: design.secondaryColor,
-        selectedExampleTemplateId: exampleTemplateId,
-        selectedFont: design.font
-      })
-      const { ok, status, data, text } = await postJson('/api/generate-logo-design', req)
-      if (!ok) {
-        const msg = (data && (data.error || data.message)) || text || `HTTP ${status}`
-        throw new Error(msg)
-      }
-      setAiSuggestions((data && data.designs) || [])
-    } catch (error) {
-      console.error('Error generating AI logo:', error)
-      alert(`Error generating AI logo: ${error.message || error}`)
-    } finally {
-      setIsGenerating(false)
+  setIsGenerating(true)
+  // allow React to paint the loader overlay before starting the network request
+  await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+
+  try {
+    const req = buildLogoRequestFromState({
+      companyName: logoData.companyName,
+      industry: logoData.industry,
+      initials: logoData.initials,
+      tagline: logoData.tagline,
+      primaryColor: design.primaryColor,
+      secondaryColor: design.secondaryColor,
+      selectedExampleTemplateId: exampleTemplateId,
+      selectedFont: design.font
+    })
+    const { ok, status, data, text } = await postJson('/api/generate-logo-design', req)
+    if (!ok) {
+      const msg = (data && (data.error || data.message)) || text || `HTTP ${status}`
+      throw new Error(msg)
     }
+    setAiSuggestions((data && data.designs) || [])
+  } catch (error) {
+    console.error('Error generating AI logo:', error)
+    alert(`Error generating AI logo: ${error.message || error}`)
+  } finally {
+    setIsGenerating(false)
+  }
   }
 
   const exportLogo = async (format) => {
@@ -281,6 +284,12 @@ const LogoCreator = () => {
 
   return (
     <div className={'creator-container' + (leftMini ? ' compact-left' : '')}>
+      {/* Full-screen overlay loader shown while any generation is in progress */}
+      {isGenerating && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.36)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 4000 }}>
+          <Loader size={64} text={'Generating...'} />
+        </div>
+      )}
       {/* Left tools column to match Business Card 3-column layout */}
       <div className={'creator-leftbar animate-fade-up animate-delay-1' + (leftMini ? ' mini' : '')}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -568,15 +577,30 @@ const LogoCreator = () => {
                 <option value={1024}>1024 px</option>
               </select>
             </div>
-            <button onClick={() => exportLogo('png')} className="btn btn-secondary">
-              📸 Export PNG
-            </button>
-            <button onClick={() => exportLogo('svg')} className="btn btn-secondary">
-              🎨 Export SVG
-            </button>
-            <button onClick={() => exportLogo('pdf')} className="btn btn-secondary">
-              📄 Export PDF
-            </button>
+            {isGenerating ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Loader size={28} text={'Generating...'} />
+              </div>
+            ) : (
+              <>
+                <button onClick={() => exportLogo('png')} className="btn btn-secondary">
+                  📸 Export PNG
+                </button>
+                <button onClick={() => exportLogo('svg')} className="btn btn-secondary">
+                  🎨 Export SVG
+                </button>
+                <button onClick={() => exportLogo('pdf')} className="btn btn-secondary">
+                  📄 Export PDF
+                </button>
+
+                {/* Share button shown when a generated raster image URL exists */}
+                {generatedImageUrl && (
+                  <button className="btn btn-secondary" onClick={() => { navigator.clipboard && navigator.clipboard.writeText(generatedImageUrl); alert('Image URL copied to clipboard') }}>
+                    🔗 Share
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -645,6 +669,8 @@ const LogoCreator = () => {
                   if (!logoData.companyName) { alert('Enter company name first'); return }
                   try {
                     setIsGenerating(true)
+                    // ensure overlay renders immediately on slow networks / cold-starts
+                    await new Promise((resolve) => requestAnimationFrame(() => resolve()))
                     const payload = {
                       companyName: logoData.companyName,
                       tagline: logoData.tagline,
@@ -686,16 +712,20 @@ const LogoCreator = () => {
                           setJobImages(imgs)
                           if (imgs[0] && imgs[0].url) setGeneratedImageUrl(imgs[0].url)
                           setJobProgress(100)
+                          // job finished: stop showing the full-screen generator
+                          setIsGenerating(false)
                           return
                         }
                         if (job.status === 'failed') {
                           alert('Job failed: ' + (job.error || 'unknown'))
                           setJobModalOpen(false)
+                          setIsGenerating(false)
                           return
                         }
                         setTimeout(poll, 1200)
                       } catch (e) {
                         console.error('job poll error', e)
+                        // on transient poll error, keep polling but keep the loader until we have a terminal state
                         setTimeout(poll, 2000)
                       }
                     }
@@ -704,7 +734,6 @@ const LogoCreator = () => {
                     console.error('Gemini→Generate error', e)
                     alert('Generation failed: ' + (e.message || e))
                     setJobModalOpen(false)
-                  } finally {
                     setIsGenerating(false)
                   }
                 }}
