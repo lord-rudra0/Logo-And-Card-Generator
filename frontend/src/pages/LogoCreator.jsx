@@ -21,7 +21,6 @@ import { exportSvgElement } from '../utils/svgExport.js'
 import LayoutControls from '../components/LayoutControls.jsx'
 import GradientControls from '../components/GradientControls.jsx'
 import { exportPdfFromSvg } from '../utils/pdfExport.js'
-import { recommendStyleAPI } from '../utils/mlApi.js'
 import OCRPanel from '../components/OCRPanel.jsx'
 import AccessibilityPanel from '../components/AccessibilityPanel.jsx'
 import LogoGeneratorPanel from '../components/LogoGeneratorPanel.jsx'
@@ -62,6 +61,7 @@ const LogoCreator = () => {
   const [isGenerating, setIsGenerating] = useState(false)
   const [exampleTemplateId, setExampleTemplateId] = useState('')
   const svgRef = useRef(null)
+  const [generatedImageUrl, setGeneratedImageUrl] = useState('')
 
   const styles = [
     { id: 'modern', name: 'Modern', icon: '🎯' },
@@ -73,12 +73,14 @@ const LogoCreator = () => {
   ]
 
   const industries = [
-    'technology', 'healthcare', 'finance', 'education', 'retail',
-    'consulting', 'creative', 'real-estate', 'food', 'fitness'
+  'technology', 'healthcare', 'finance', 'education', 'retail',
+  'consulting', 'creative', 'real-estate', 'food', 'fitness',
+  'manufacturing', 'automotive', 'media', 'energy', 'legal', 'other'
   ]
 
   const [icons, setIcons] = useState(EMOJI_ICONS)
   const [iconsLoaded, setIconsLoaded] = useState(false)
+  const [otherIndustry, setOtherIndustry] = useState('')
 
   const ensureLargeEmojiSet = async () => {
     if (iconsLoaded) return
@@ -90,63 +92,7 @@ const LogoCreator = () => {
 
   }
 
-  const autoStyleWithAI = async () => {
-    if (!logoData.companyName) {
-      alert('Please enter a company name to auto-style with AI')
-      return
-    }
-    setIsGenerating(true)
-    try {
-      const req = buildLogoRequestFromState({
-        companyName: logoData.companyName,
-        industry: logoData.industry,
-        initials: logoData.initials,
-        tagline: logoData.tagline,
-        primaryColor: design.primaryColor,
-        secondaryColor: design.secondaryColor,
-        selectedExampleTemplateId: exampleTemplateId,
-        selectedFont: design.font
-      })
-      const { ok, status, data, text } = await postJson('/api/generate-logo-design', req)
-      if (!ok) {
-        const msg = (data && (data.error || data.message)) || text || `HTTP ${status}`
-        throw new Error(msg)
-      }
-      const payload = data || {}
-      const suggestion = (payload.designs && payload.designs[0]) || null
-      if (!suggestion) throw new Error('No AI suggestion returned')
 
-      const primary = suggestion.colors?.primary || suggestion.primaryColor || design.primaryColor
-      const secondary = suggestion.colors?.secondary || suggestion?.gradient?.stops?.[1]?.color || design.secondaryColor || primary
-      const font = mapTypographyToFont(suggestion.typography?.font || suggestion.typography)
-      const tplFromAI = suggestion.layout?.template
-      const tpl = guessLayoutTemplate(suggestion, logoData)
-      const shp = guessShape(logoData)
-
-      setDesign(prev => ({
-        ...prev,
-        style: suggestion.style || prev.style,
-        icon: suggestion.icon?.emoji || suggestion.icon || prev.icon,
-        primaryColor: primary,
-        secondaryColor: secondary,
-        font,
-        layoutTemplate: tplFromAI || tpl,
-        shape: shp
-      }))
-      // Switch to a specific SVG template if AI suggested one
-      if (tplFromAI) {
-        setExampleTemplateId(tplFromAI)
-      } else {
-        // default to procedural unique icon
-        setExampleTemplateId('abstract-duotone-procedural')
-      }
-    } catch (e) {
-      console.error('Auto-style failed:', e)
-      alert(`Auto-style failed: ${e.message || e}`)
-    } finally {
-      setIsGenerating(false)
-    }
-  }
 
   const colors = [
     '#3b82f6', '#ef4444', '#10b981', '#f59e0b',
@@ -192,6 +138,14 @@ const LogoCreator = () => {
     const logoElement = document.getElementById('logo-preview')
     
     if (format === 'png') {
+      // If a generated raster image is present, download it directly
+      if (generatedImageUrl) {
+        const link = document.createElement('a')
+        link.download = `logo-${(logoData.companyName || 'brand')}.png`
+        link.href = generatedImageUrl
+        link.click()
+        return
+      }
       const canvas = await html2canvas(logoElement, {
         backgroundColor: null,
         scale: 4
@@ -332,38 +286,7 @@ const LogoCreator = () => {
           >
             {isGenerating ? '🤖 Generating...' : '✨ Generate AI Logo'}
           </button>
-          <button
-            onClick={async () => {
-              try {
-                setIsGenerating(true)
-                const rec = await recommendStyleAPI({ industry: logoData.industry, mood: 'professional' })
-                if (rec && rec.palette) {
-                  setDesign(prev => ({ ...prev, primaryColor: rec.palette.primary, secondaryColor: rec.palette.secondary }))
-                }
-                if (rec && rec.fonts) {
-                  setDesign(prev => ({ ...prev, font: `${rec.fonts.heading}, system-ui, -apple-system` }))
-                }
-              } catch (e) {
-                console.error('Recommend style failed', e)
-                alert('Recommend style failed: ' + (e.message || e))
-              } finally {
-                setIsGenerating(false)
-              }
-            }}
-            className="btn btn-secondary"
-            style={{ width: '100%' }}
-            disabled={isGenerating}
-          >
-            {isGenerating ? '⏳ Applying...' : '🎨 Recommend Style'}
-          </button>
-          <button 
-            onClick={autoStyleWithAI} 
-            className="btn btn-secondary" 
-            style={{ width: '100%' }}
-            disabled={isGenerating}
-          >
-            {isGenerating ? '🎛️ Applying...' : '🎛️ Auto Style with AI'}
-          </button>
+          {/* Recommend Style and Auto-style buttons removed to declutter UI */}
         </div>
 
         <StylesDropdown
@@ -466,7 +389,11 @@ const LogoCreator = () => {
             }}
           >
             <div style={{ textAlign: 'center' }}>
-              {exampleTemplateId ? (
+              {generatedImageUrl ? (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                  <img src={generatedImageUrl} alt="Generated logo" style={{ maxWidth: '80%', maxHeight: 320, objectFit: 'contain', borderRadius: 8, boxShadow: '0 6px 18px rgba(0,0,0,0.12)' }} />
+                </div>
+              ) : exampleTemplateId ? (
                 <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                   <LogoRendererSVG
                     ref={svgRef}
@@ -623,18 +550,127 @@ const LogoCreator = () => {
       <div className="creator-sidebar animate-fade-up animate-delay-3">
         <h3>Logo Details</h3>
 
-        <div className="form-group">
-          <label className="form-label">Company Name</label>
-          <input 
-            type="text" 
-            className="input"
-            value={logoData.companyName}
-            onChange={(e) => handleDataChange('companyName', e.target.value)}
-            placeholder="Your Company"
-          />
+  <div className="company-details-card" style={{ padding: 12, borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', marginBottom: 'var(--spacing-2)' }}>
+          <div style={{ marginBottom: 8 }}>
+            <label className="form-label" style={{ marginBottom: 6 }}>Company Name</label>
+            <input
+              type="text"
+              className="input"
+              value={logoData.companyName}
+              onChange={(e) => handleDataChange('companyName', e.target.value)}
+              placeholder="Your Company"
+            />
+            <div style={{ marginTop: 8 }}>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  if (!logoData.companyName) { alert('Enter company name first'); return }
+                  try {
+                    setIsGenerating(true)
+                    const payload = {
+                      companyName: logoData.companyName,
+                      tagline: logoData.tagline,
+                      initials: logoData.initials,
+                      industry: logoData.industry,
+                      otherIndustry,
+                      primaryColor: design.primaryColor,
+                      secondaryColor: design.secondaryColor,
+                      style: design.style,
+                      count: 1,
+                      width: 512,
+                      height: 512
+                    }
+                    const { ok, status, data, text } = await postJson('/api/ml/generate-logo-gemini', payload)
+                    if (!ok) {
+                      const msg = (data && (data.error || data.message)) || text || `HTTP ${status}`
+                      throw new Error(msg)
+                    }
+                    // backend returns data.images array with {url, cached}
+                    const images = (data && data.data && data.data.images) || []
+                    if (images.length) {
+                      // Map to aiSuggestions-like minimal objects so existing UI can show them
+                      const mapped = images.map((it, i) => ({ name: `${logoData.companyName} ${i+1}`, icon: { emoji: '🖼️' }, url: it.url || it }))
+                      setAiSuggestions(mapped)
+                      // Auto-apply the first generated image into the preview
+                      if (mapped[0] && mapped[0].url) setGeneratedImageUrl(mapped[0].url)
+                    } else {
+                      alert('No images returned')
+                    }
+                  } catch (e) {
+                    console.error('Gemini→Generate error', e)
+                    alert('Generation failed: ' + (e.message || e))
+                  } finally {
+                    setIsGenerating(false)
+                  }
+                }}
+                disabled={isGenerating}
+                style={{ marginTop: 8 }}
+              >
+                {isGenerating ? '🤖 Generating...' : '✨ Generate AI Logo'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <div>
+              <label className="form-label">Tagline (Optional)</label>
+              <input
+                type="text"
+                className="input"
+                value={logoData.tagline}
+                onChange={(e) => handleDataChange('tagline', e.target.value)}
+                placeholder="Your company tagline"
+              />
+            </div>
+
+            <div>
+              <label className="form-label">Initials</label>
+              <input
+                type="text"
+                className="input"
+                value={logoData.initials}
+                onChange={(e) => handleDataChange('initials', e.target.value)}
+                placeholder="YC"
+                style={{ textTransform: 'uppercase' }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="form-label">Industry <span style={{ color: 'var(--accent)', fontWeight: 600 }}>*</span></label>
+            <select
+              className="input"
+              value={logoData.industry}
+              onChange={(e) => handleDataChange('industry', e.target.value)}
+              required
+              style={{ width: '100%' }}
+            >
+              <option value="">Select industry</option>
+              {industries.map(industry => (
+                <option key={industry} value={industry}>
+                  {industry.charAt(0).toUpperCase() + industry.slice(1)}
+                </option>
+              ))}
+            </select>
+
+            {logoData.industry === 'other' && (
+              <div style={{ marginTop: 8 }}>
+                <label className="form-label">Please specify industry</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={otherIndustry}
+                  onChange={(e) => setOtherIndustry(e.target.value)}
+                  placeholder="e.g. Agritech"
+                />
+              </div>
+            )}
+          </div>
         </div>
 
-        <OCRPanel onResult={(res) => {
+  <LogoGeneratorPanel />
+
+  <OCRPanel onResult={(res) => {
           if (res && res.text) {
             // try to auto-fill company name if not present
             const lines = (res.text || '').split(/\n+/).map(l => l.trim()).filter(Boolean)
@@ -648,44 +684,7 @@ const LogoCreator = () => {
         }} />
 
         <AccessibilityPanel />
-  <LogoGeneratorPanel />
-
-        <div className="form-group">
-          <label className="form-label">Initials (Optional)</label>
-          <input 
-            type="text" 
-            className="input"
-            value={logoData.initials}
-            onChange={(e) => handleDataChange('initials', e.target.value)}
-            placeholder="YC"
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Tagline (Optional)</label>
-          <input 
-            type="text" 
-            className="input"
-            value={logoData.tagline}
-            onChange={(e) => handleDataChange('tagline', e.target.value)}
-            placeholder="Your company tagline"
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Industry</label>
-          <select 
-            className="input"
-            value={logoData.industry}
-            onChange={(e) => handleDataChange('industry', e.target.value)}
-          >
-            {industries.map(industry => (
-              <option key={industry} value={industry}>
-                {industry.charAt(0).toUpperCase() + industry.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
+  {/* Company initials, tagline and industry are handled inside the company-details-card above */}
 
         {/* Sidebar reserved for textual details only */}
       </div>

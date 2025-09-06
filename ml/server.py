@@ -7,6 +7,35 @@ import base64
 import httpx
 import asyncio
 
+# Load environment from ml/.env if present. Attempts to use python-dotenv first,
+# and falls back to a simple parser if python-dotenv isn't installed.
+try:
+    from dotenv import load_dotenv
+    from pathlib import Path
+    env_path = Path(__file__).resolve().parent / '.env'
+    if env_path.exists():
+        load_dotenv(dotenv_path=str(env_path))
+    else:
+        # fallback to any loaded environment
+        load_dotenv()
+except Exception:
+    # Simple fallback: parse key=value lines from ml/.env
+    try:
+        env_path = os.path.join(os.path.dirname(__file__), '.env')
+        if os.path.exists(env_path):
+            with open(env_path, 'r') as fh:
+                for ln in fh:
+                    ln = ln.strip()
+                    if not ln or ln.startswith('#'):
+                        continue
+                    if '=' in ln:
+                        k, v = ln.split('=', 1)
+                        v = v.strip().strip('"').strip("'")
+                        os.environ.setdefault(k.strip(), v)
+    except Exception:
+        # best-effort; do not crash if dotenv not present
+        print('Warning: could not load ml/.env — ensure env vars are set')
+
 # Optional local Diffusers backend
 USE_LOCAL_DIFFUSION = os.environ.get('USE_LOCAL_DIFFUSION', '') in ('1', 'true', 'True')
 LOCAL_BASE_MODEL = os.environ.get('LOCAL_BASE_MODEL') or 'stabilityai/stable-diffusion-xl-base-1.0'

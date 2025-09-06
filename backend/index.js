@@ -11,7 +11,7 @@ import mlRoutes from './routes/ml.js'
 dotenv.config()
 
 const app = express()
-const PORT = process.env.PORT || 5000
+const PORT = process.env.BACKEND_PORT || process.env.PORT || 5000
 const ML_SERVICE_URL = process.env.PY_IMAGE_SERVICE_URL || 'http://localhost:8000'
 
 // No external ML provider initialized; pass null to services that accept a genAI param
@@ -22,6 +22,7 @@ app.use(cors())
 app.use(express.json())
 // serve cached generated images (store is under backend/services/cache)
 import path from 'path'
+import fs from 'fs'
 // Resolve cache directory relative to this file so serving works regardless of
 // the working directory used to start the process.
 const __dirname = path.dirname(new URL(import.meta.url).pathname)

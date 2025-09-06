@@ -133,6 +133,105 @@ router.post('/generate-logo', async (req, res) => {
   }
 })
 
+// POST /api/ml/generate-logo-gemini
+// Body: { companyName, tagline, initials, industry, otherIndustry, primaryColor, secondaryColor, style, count, width, height }
+router.post('/generate-logo-gemini', async (req, res) => {
+  try {
+    const body = req.body || {}
+    const {
+      companyName = '',
+      tagline = '',
+      initials = '',
+      industry = '',
+      otherIndustry = '',
+      primaryColor,
+      secondaryColor,
+      style,
+      count = 1,
+      width = 512,
+      height = 512
+    } = body
+
+    const resolvedIndustry = (otherIndustry && String(otherIndustry).trim()) || industry || 'technology'
+
+    // Build a human-friendly briefing for Gemini
+    const brief = `Company: ${companyName || 'Unnamed Company'}\nTagline: ${tagline || ''}\nInitials: ${initials || ''}\nIndustry: ${resolvedIndustry}\nStyle: ${style || 'modern/minimal'}\nColors: primary=${primaryColor || ''}, secondary=${secondaryColor || ''}`
+
+    // Try to call Gemini (Google Generative API) if configured
+    let detailedPrompt = null
+    const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null
+    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'models/gemini-1.0'
+    if (GEMINI_KEY) {
+      try {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta2/${GEMINI_MODEL}:generateText`
+        const promptText = `You are a professional logo designer and prompt engineer for image generation models. Given the following company brief, produce a concise but richly detailed Stable Diffusion / image-model prompt describing the composition, iconography, color palette, lighting, focal point, style, camera/angle, material details, and negative prompt (if needed).\n\nBrief:\n${brief}\n\nRespond only with the final prompt string.`
+        const r = await fetch(geminiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GEMINI_KEY}`
+          },
+          body: JSON.stringify({
+            prompt: { text: promptText },
+            temperature: 0.2,
+            maxOutputTokens: 800
+          })
+        })
+        if (r.ok) {
+          const j = await r.json()
+          // Try several response shapes: text in output[0].content[0].text or candidates
+          if (j && j.candidates && j.candidates[0] && j.candidates[0].content) {
+            // some Gemini responses include content array
+            const found = j.candidates[0].content.map(c => c.text || c).join('')
+            detailedPrompt = String(found).trim()
+          } else if (j && j.output && j.output[0] && j.output[0].content) {
+            detailedPrompt = j.output[0].content.map(c => c.text || c).join('')
+          } else if (j && j.candidate) {
+            detailedPrompt = String(j.candidate).trim()
+          } else if (typeof j === 'string') {
+            detailedPrompt = j
+          }
+        } else {
+          const text = await r.text()
+          console.warn('Gemini call failed', r.status, text)
+        }
+      } catch (e) {
+        console.warn('Gemini call error:', e && e.message)
+      }
+    }
+
+    // Fallback to a templated prompt if Gemini not available / failed
+    if (!detailedPrompt) {
+      detailedPrompt = `A clean, iconic logo for ${companyName || 'a company'}`
+      if (tagline) detailedPrompt += ` with the tagline \"${tagline}\"`
+      detailedPrompt += `, industry: ${resolvedIndustry}. Style: ${style || 'modern, minimal'}, colors: ${primaryColor || 'primary'}, ${secondaryColor || 'secondary'}. Generate a detailed image description for a Stable Diffusion-style model including composition, focal point, iconography, background, lighting, material textures, and a short negative prompt.`
+    }
+
+    // Now proxy to Python ML service to generate images from the detailed prompt
+    if (!PY_ML_URL) return res.status(501).json({ success: false, error: 'Python ML service not configured' })
+    const mlPayload = {
+      prompt: detailedPrompt,
+      count,
+      width,
+      height
+    }
+    const data = await proxyToPython('generate/logo', mlPayload)
+    const imgs = data.images || data.generated_images || []
+    const saved = imgs.map((d) => {
+      try {
+        const { filename } = saveBase64Image(d)
+        return { url: getCacheUrl(filename), cached: true }
+      } catch (e) {
+        return { url: d, cached: false }
+      }
+    })
+    return res.json({ success: true, data: { prompt: detailedPrompt, raw: data, images: saved } })
+  } catch (err) {
+    console.error('generate-logo-gemini error', err)
+    res.status(500).json({ success: false, error: String(err && err.message) })
+  }
+})
+
 // GET /api/ml/job/:id
 router.get('/job/:id', async (req, res) => {
   try {
