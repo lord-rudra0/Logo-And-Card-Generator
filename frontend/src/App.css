@@ -84,6 +84,7 @@ main {
   border-radius: var(--spacing-3);
   padding: var(--spacing-6);
   min-height: 600px;
+  position: relative; /* allow absolute overlays inside main */
 }
 
 .creator-sidebar {
@@ -93,6 +94,17 @@ main {
   border: 1px solid var(--border-color);
 }
 
+/* Floating job panel that overlays content in the main area */
+.job-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1200;
+  width: 420px;
+  max-width: calc(100% - 32px);
+  box-shadow: 0 12px 32px rgba(2,6,23,0.25);
+}
+
 /* New left tools column */
 .creator-leftbar {
   background: var(--bg-secondary);
@@ -100,6 +112,62 @@ main {
   padding: var(--spacing-6);
   border: 1px solid var(--border-color);
 }
+
+/* Compact leftbar variant - reduces padding, hides labels while keeping icons */
+.compact-left .creator-leftbar {
+  width: 72px;
+  padding: 12px;
+}
+
+.creator-leftbar.mini h3,
+.creator-leftbar.mini .tool-label {
+  display: none;
+}
+
+.creator-leftbar.mini .tool-icon {
+  display: inline-block;
+  margin-right: 0;
+}
+
+.tool-section summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.tool-section summary {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  padding: 8px 10px;
+  border-radius: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tool-section summary .tool-icon { margin-right: 8px; }
+
+.tool-section summary::after {
+  content: '\25BC';
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.tool-section[open] summary::after {
+  content: '\25B2';
+}
+
+.tool-section summary:hover {
+  background: var(--bg-tertiary);
+}
+
+.tool-section .tool-body {
+  padding: 6px 0 12px 0;
+}
+
+.creator-leftbar.mini details .tool-body { display: none; }
 
 .form-group {
   margin-bottom: var(--spacing-4);

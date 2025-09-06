@@ -207,14 +207,34 @@ router.post('/generate-logo-gemini', async (req, res) => {
       detailedPrompt += `, industry: ${resolvedIndustry}. Style: ${style || 'modern, minimal'}, colors: ${primaryColor || 'primary'}, ${secondaryColor || 'secondary'}. Generate a detailed image description for a Stable Diffusion-style model including composition, focal point, iconography, background, lighting, material textures, and a short negative prompt.`
     }
 
-    // Now proxy to Python ML service to generate images from the detailed prompt
-    if (!PY_ML_URL) return res.status(501).json({ success: false, error: 'Python ML service not configured' })
-    const mlPayload = {
-      prompt: detailedPrompt,
-      count,
-      width,
-      height
+    // Support async job creation: ?async=true
+    const wantAsync = req.query && String(req.query.async) === 'true'
+    const mlPayload = { prompt: detailedPrompt, count, width, height }
+
+    if (wantAsync) {
+      const job = createJob(async (updateProgress) => {
+        if (!PY_ML_URL) throw new Error('Python ML service not configured')
+        updateProgress(5)
+        // send to python ml
+        const data = await proxyToPython('generate/logo', mlPayload)
+        updateProgress(60)
+        const imgs = data.images || data.generated_images || []
+        const saved = imgs.map((d) => {
+          try {
+            const { filename } = saveBase64Image(d)
+            return { url: getCacheUrl(filename), cached: true }
+          } catch (e) {
+            return { url: d, cached: false }
+          }
+        })
+        updateProgress(95)
+        return { prompt: detailedPrompt, raw: data, images: saved }
+      })
+      return res.json({ success: true, jobId: job.id })
     }
+
+    // Synchronous path
+    if (!PY_ML_URL) return res.status(501).json({ success: false, error: 'Python ML service not configured' })
     const data = await proxyToPython('generate/logo', mlPayload)
     const imgs = data.images || data.generated_images || []
     const saved = imgs.map((d) => {

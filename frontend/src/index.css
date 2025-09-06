@@ -125,19 +125,23 @@ p {
   gap: var(--spacing-2);
   padding: var(--spacing-3) var(--spacing-6);
   border-radius: var(--spacing-2);
-  font-weight: 500;
+  font-weight: 600;
   text-decoration: none;
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.875rem;
+  transition: all 0.15s ease;
+  font-size: 0.95rem;
   line-height: 1;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
 }
 
 .btn-primary {
   background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
   color: white;
-  box-shadow: 0 2px 8px var(--shadow);
+  border-color: rgba(0,0,0,0.04);
+  box-shadow: 0 6px 18px rgba(59,130,246,0.12);
 }
 
 .btn-primary:hover {
@@ -145,6 +149,14 @@ p {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px var(--shadow);
 }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px dashed transparent;
+  padding: 6px 10px;
+}
+
 
 .btn-secondary {
   background: var(--bg-secondary);
@@ -156,6 +168,69 @@ p {
   background: var(--bg-tertiary);
   transform: translateY(-1px);
 }
+
+.btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.08);
+}
+
+/* Improved button styles for job panel and compact leftbar */
+.btn-ghost {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid rgba(0,0,0,0.06);
+  padding: 6px 10px;
+}
+
+/* Job panel specific button styles to ensure consistent look */
+.job-panel .btn {
+  padding: 8px 10px;
+  font-size: 0.92rem;
+  border-radius: 8px;
+  line-height: 1;
+}
+
+.job-panel .btn-primary {
+  background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(59,130,246,0.12);
+}
+
+.job-panel .btn-secondary {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.job-panel .btn-ghost {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid transparent;
+}
+
+.job-panel .btn:hover { transform: translateY(-1px); }
+
+/* Compact leftbar button adjustments */
+.creator-leftbar.mini .btn {
+  padding: 6px;
+  min-width: 40px;
+  height: 36px;
+  font-size: 0.825rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.creator-leftbar.mini .btn.btn-primary {
+  width: 100%;
+}
+
+/* Small visual tweak for the toggle button */
+.creator-leftbar .btn-ghost[title] {
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
 
 .card {
   background: var(--bg-secondary);
