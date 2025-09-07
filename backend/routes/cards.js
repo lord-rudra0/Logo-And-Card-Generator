@@ -1,4 +1,5 @@
 import express from 'express'
+import fetch from 'node-fetch'
 import { generateCardDesign, generateCardImage, generateCardSVG } from '../services/aiService.js'
 
 const router = express.Router()
@@ -92,11 +93,60 @@ router.post('/generate-card-image', async (req, res) => {
       return res.status(400).json({ error: 'cardData.name and cardData.company are required' })
     }
 
+    // If a Python ML service is configured, proxy the request and request both
+    // Stability (platform) and the existing generate/logo endpoint so the frontend
+    // can show both outputs for comparison.
+    const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
+    if (PY_ML_URL) {
+      try {
+        const prompt = `A high-quality business card layout for ${cardData.name} at ${cardData.company}. Title: ${cardData.title || ''}. Contact: ${cardData.email || ''} ${cardData.phone || ''}. Style: clean, minimal, vector-friendly, centered composition. Include company name or initials as a visible element.`
+        const width = (size && size.width) || 1050
+        const height = (size && size.height) || 600
+
+        const stabilityPayload = { prompt, width, height, steps: 20, cfg_scale: 7.5, samples: 1 }
+        const logoPayload = { prompt, width, height, steps: 20, guidance_scale: 7.5 }
+
+        const stabilityUrl = `${PY_ML_URL.replace(/\/$/, '')}/generate/stability`
+        const logoUrl = `${PY_ML_URL.replace(/\/$/, '')}/generate/logo`
+
+        const [stabRes, logoRes] = await Promise.all([
+          fetch(stabilityUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stabilityPayload) }),
+          fetch(logoUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(logoPayload) })
+        ])
+
+        const stabJson = stabRes.ok ? await stabRes.json() : { error: await stabRes.text(), ok: false }
+        const logoJson = logoRes.ok ? await logoRes.json() : { error: await logoRes.text(), ok: false }
+
+        // Normalize images into array of { source, dataUrl }
+        const images = []
+        if (stabJson && Array.isArray(stabJson.images)) {
+          stabJson.images.forEach((d) => images.push({ source: 'stability', dataUrl: d }))
+        } else if (stabJson && stabJson.images && typeof stabJson.images === 'string') {
+          images.push({ source: 'stability', dataUrl: stabJson.images })
+        }
+        if (logoJson && Array.isArray(logoJson.images)) {
+          logoJson.images.forEach((d) => images.push({ source: 'hf_or_logo', dataUrl: d }))
+        } else if (logoJson && logoJson.images && typeof logoJson.images === 'string') {
+          images.push({ source: 'hf_or_logo', dataUrl: logoJson.images })
+        }
+
+        // If nothing returned, fallback to aiService (non-ML) placeholder or error
+        if (images.length === 0) {
+          return res.status(502).json({ error: 'ML service returned no images', details: { stability: stabJson, logo: logoJson } })
+        }
+
+        return res.json({ success: true, images })
+      } catch (e) {
+        console.error('Error proxying to Python ML service:', e)
+        // fall through to fallback
+      }
+    }
+
+    // Fallback: attempt to call the local aiService which may be a placeholder
     try {
       const imageBase64 = await generateCardImage(genAI, cardData, industry || 'business', size)
-      return res.json({ success: true, imageBase64 })
+      return res.json({ success: true, images: [{ source: 'fallback', dataUrl: `data:image/png;base64,${imageBase64}` }] })
     } catch (innerErr) {
-      // If not configured, surface a helpful message
       return res.status(501).json({ error: innerErr.message || 'Image generation not configured' })
     }
   } catch (error) {

@@ -51,6 +51,16 @@ app.get('/api/health', (req, res) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`)
   console.log(`📡 API available at http://localhost:${PORT}/api`)
-  
-  console.log('ℹ️ ML features are disabled in this build')
+  // Probe ML service URL to show connected status when available
+  try {
+    const fetch = (await import('node-fetch')).default
+    const res = await fetch(ML_SERVICE_URL + '/health', { method: 'GET', timeout: 2000 }).catch(() => null)
+    if (res && res.ok) {
+      console.log(`🔗 ML service connected at ${ML_SERVICE_URL}`)
+    } else {
+      console.log('ℹ️ ML features are disabled in this build or ML service not reachable (set PY_IMAGE_SERVICE_URL to enable)')
+    }
+  } catch (e) {
+    console.log('ℹ️ ML features are disabled in this build or ML service not reachable (set PY_IMAGE_SERVICE_URL to enable)')
+  }
 })

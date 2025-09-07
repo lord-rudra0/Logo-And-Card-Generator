@@ -123,6 +123,18 @@ def _generate_local_image_sync(prompt, steps=40, high_noise_frac=0.8, width=512,
 app = FastAPI(title='CardGEN ML PoC Service')
 
 
+@app.get('/health')
+async def health():
+    # Lightweight health endpoint used by the Node backend to detect ML availability
+    info = {
+        'status': 'ok',
+        'service': 'cardgen-ml',
+        'use_local_diffusion': bool(USE_LOCAL_DIFFUSION),
+        'model': os.environ.get('STABILITY_MODEL') or os.environ.get('HUGGINGFACE_MODEL') or ''
+    }
+    return info
+
+
 class RecommendRequest(BaseModel):
     industry: Optional[str] = 'technology'
     mood: Optional[str] = 'professional'
@@ -436,6 +448,44 @@ async def generate_logo(req: GenerateLogoRequest):
 
         # exhausted retries
         raise HTTPException(status_code=502, detail=f'HuggingFace inference failed: {str(last_exc)}')
+
+
+    # New endpoint: direct Stability Platform generation using platform API key from ml/.env
+    try:
+        from .stability_client import generate_stability_image
+    except Exception:
+        # relative import fallback for direct execution
+        try:
+            from stability_client import generate_stability_image
+        except Exception:
+            generate_stability_image = None
+
+
+    class StabilityRequest(BaseModel):
+        prompt: str
+        width: Optional[int] = 512
+        height: Optional[int] = 512
+        steps: Optional[int] = 20
+        cfg_scale: Optional[float] = 7.5
+        samples: Optional[int] = 1
+
+
+    @app.post('/generate/stability')
+    async def generate_stability(req: StabilityRequest):
+        if not generate_stability_image:
+            raise HTTPException(status_code=501, detail='Stability client not available on this server')
+        try:
+            images = await generate_stability_image(
+                prompt=req.prompt,
+                width=req.width or 512,
+                height=req.height or 512,
+                steps=req.steps or 20,
+                cfg_scale=req.cfg_scale or 7.5,
+                samples=req.samples or 1,
+            )
+            return { 'images': images, 'source': 'stability' }
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f'Stability generation failed: {str(e)}')
 """
 ML service removed
 

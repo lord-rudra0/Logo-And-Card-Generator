@@ -325,6 +325,7 @@ const CardCreator = () => {
   const [aiSuggestions, setAiSuggestions] = useState([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationMode, setGenerationMode] = useState('svg') // 'svg' | 'png'
+  const [aiGeneratedImages, setAiGeneratedImages] = useState([])
 
   // Template library pagination
   const [templatesPage, setTemplatesPage] = useState(1)
@@ -578,15 +579,18 @@ const deleteSelectedImage = () => {
       if (!res.ok) {
         throw new Error(data?.error || 'Failed to generate image')
       }
-      const imageBase64 = data?.imageBase64
-      if (!imageBase64) {
-        alert('No image returned by AI. Please try again.')
+      // Expecting { images: [{ source, dataUrl }, ...] }
+      const imgs = data?.images || []
+      if (!imgs || imgs.length === 0) {
+        alert('No images returned by AI. Please try again.')
         return
       }
-      const link = document.createElement('a')
-      link.download = `business-card-${cardData.name}.png`
-      link.href = `data:image/png;base64,${imageBase64}`
-      link.click()
+      // Normalize: ensure dataUrl strings
+      const normalized = imgs.map((it) => {
+        if (typeof it === 'string') return { source: 'unknown', dataUrl: it }
+        return { source: it.source || 'unknown', dataUrl: it.dataUrl || it }
+      })
+      setAiGeneratedImages(normalized)
     } catch (err) {
       console.error('AI Image error:', err)
       alert(`Error generating AI Image: ${err.message}`)
@@ -1909,6 +1913,31 @@ const deleteSelectedImage = () => {
             </button>
           )}
         </div>
+
+        {aiGeneratedImages.length > 0 && (
+          <div style={{ marginTop: 'var(--spacing-4)' }}>
+            <h4>AI Generated Images</h4>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {aiGeneratedImages.map((img, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--panel-muted)', padding: 8, borderRadius: 8 }}>
+                  <img src={img.dataUrl} alt={`ai-${idx}`} style={{ width: 120, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(255,255,255,0.06)' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                    <div style={{ fontSize: 12, opacity: 0.9 }}>{img.source}</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="btn btn-primary" onClick={() => {
+                        // Apply: set preview background image to generated image
+                        setBgImageUrl(img.dataUrl)
+                        // also add as a logo image
+                        onAddLogo(img.dataUrl)
+                      }}>Apply</button>
+                      <a className="btn btn-secondary" href={img.dataUrl} download={`business-card-${cardData.name || idx}.png`} style={{ textDecoration: 'none', display: 'inline-block', padding: '6px 10px' }}>Download</a>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <h4>Templates</h4>
         <div className="template-grid">
