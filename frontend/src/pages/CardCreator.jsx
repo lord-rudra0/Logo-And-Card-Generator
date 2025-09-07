@@ -329,7 +329,7 @@ const CardCreator = () => {
 
   // Template library pagination
   const [templatesPage, setTemplatesPage] = useState(1)
-  const pageSize = 24
+  const pageSize = 10
   const totalPages = Math.ceil((GENERATED_TEMPLATES?.length || 0) / pageSize) || 1
   const currentTemplates = GENERATED_TEMPLATES.slice((templatesPage - 1) * pageSize, templatesPage * pageSize)
 
@@ -374,6 +374,9 @@ const CardCreator = () => {
   // Icons state
   const [icons, setIcons] = useState([]) // {id: string, iconId: string, x,y,size,color}
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
+
+  // Left tools column collapsed state (compact rail)
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
 
   // Assets: background image and draggable images/logos
   const [bgImageUrl, setBgImageUrl] = useState('')
@@ -657,6 +660,18 @@ const deleteSelectedImage = () => {
       pdf.save(`business-card-${cardData.name}.pdf`)
     }
   }
+
+  // Small inline spinner component
+  const Spinner = ({ size = 28 }) => (
+    <div style={{ display: 'inline-block', width: size, height: size }} aria-hidden="true">
+      <svg viewBox="0 0 50 50" style={{ width: size, height: size }}>
+        <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="5" />
+        <path d="M45 25a20 20 0 0 1-20 20" stroke="#ffffff" strokeWidth="5" strokeLinecap="round" fill="none">
+          <animateTransform attributeType="xml" attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.9s" repeatCount="indefinite" />
+        </path>
+      </svg>
+    </div>
+  )
 
   const handleInputChange = (field, value) => {
     setCardData(prev => ({ ...prev, [field]: value }))
@@ -1051,8 +1066,24 @@ const deleteSelectedImage = () => {
 
   return (
     <div className="creator-container">
-      {/* Left tools column */}
-      <div className="creator-leftbar animate-fade-up animate-delay-1">
+      {/* Left tools column (collapsible) */}
+      <div className="creator-leftbar animate-fade-up animate-delay-1" style={{ width: leftCollapsed ? 64 : 'auto' }}>
+        {leftCollapsed ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: 8 }}>
+            <button className="btn btn-secondary" title="Expand" onClick={() => setLeftCollapsed(false)}>➤</button>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <button className="btn" title="Assets">📁</button>
+              <button className="btn" title="Colors">🎨</button>
+              <button className="btn" title="Icons">🔣</button>
+              <button className="btn" title="Layout">📐</button>
+              <button className="btn" title="Size">📏</button>
+              <button className="btn" title="Typography">🔤</button>
+              <button className="btn" title="Background">🖼️</button>
+              <button className="btn" title="Positioning">📌</button>
+            </div>
+          </div>
+        ) : (
+          <>
         <h3>Design Tools</h3>
 
         <h4 style={{ marginTop: 'var(--spacing-2)' }}>Assets</h4>
@@ -1425,6 +1456,8 @@ const deleteSelectedImage = () => {
 
         {/* Icon Picker modal */}
         <IconPicker open={iconPickerOpen} onClose={() => setIconPickerOpen(false)} onSelect={addIcon} />
+          </>
+        )}
       </div>
 
       <div className="creator-main animate-fade-up animate-delay-2">
@@ -1609,6 +1642,16 @@ const deleteSelectedImage = () => {
             )})()}
           </div>
 
+          {/* Overlay spinner on top of preview while generating */}
+          {isGenerating && (
+            <div style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+              <div style={{ pointerEvents: 'auto', background: 'rgba(0,0,0,0.5)', padding: 16, borderRadius: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Spinner size={36} />
+                <div style={{ color: '#fff', fontSize: 14 }}>Generating preview…</div>
+              </div>
+            </div>
+          )}
+
           <div className="flex" style={{ gap: 'var(--spacing-3)', justifyContent: 'center' }}>
             <button onClick={() => exportCard('png')} className="btn btn-secondary">
               📸 Export PNG
@@ -1765,21 +1808,7 @@ const deleteSelectedImage = () => {
           </div>
         </div>
 
-        {aiSuggestions.length > 0 && (
-          <div>
-            <h3>AI Generated Suggestions</h3>
-            <div className="ai-suggestions" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
-              {aiSuggestions.map((s, idx) => (
-                <div key={idx} className="suggestion-card" onClick={() => applyAiSuggestion(s)} style={{ cursor: 'pointer', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--panel-muted)' }}>
-                  <div style={{ padding: 8, fontSize: 12, fontWeight: 600 }}>{s.name || 'Concept'}</div>
-                  <div style={{ padding: 8 }}>
-                    <MiniCardPreview suggestion={s} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+  {/* AI suggestions are shown only in the sidebar now. */}
       </div>
 
       <div className="creator-sidebar animate-fade-up animate-delay-3">
@@ -1884,35 +1913,39 @@ const deleteSelectedImage = () => {
           </button>
         </div>
 
-        <h4>AI Output Mode</h4>
-        <div style={{ display: 'flex', gap: 'var(--spacing-2)', marginBottom: 'var(--spacing-3)' }}>
-          <button
-            className={`btn ${generationMode === 'svg' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setGenerationMode('svg')}
-            style={{ flex: 1 }}
-          >
-            Vector (SVG)
-          </button>
-          <button
-            className={`btn ${generationMode === 'png' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setGenerationMode('png')}
-            style={{ flex: 1 }}
-          >
-            Image (PNG)
-          </button>
-        </div>
+        {/* Sidebar: show AI suggestions immediately under the Generate button */}
+        {aiSuggestions.length > 0 && (
+          <div style={{ marginTop: 'var(--spacing-3)' }}>
+            <h4 style={{ margin: '8px 0' }}>Suggestions</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+              {aiSuggestions.slice(0, 6).map((s, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => applyAiSuggestion(s)}
+                  className="suggestion-card"
+                  style={{ cursor: 'pointer', padding: 8, borderRadius: 8, background: 'var(--panel-muted)', border: '1px solid var(--panel-muted)', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name || 'Concept'}</div>
+                  <div style={{ width: 150, height: 86, overflow: 'hidden' }}>
+                    <div style={{ transform: 'scale(0.5)', transformOrigin: 'top left' }}>
+                      <MiniCardPreview suggestion={s} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-        <div style={{ marginBottom: 'var(--spacing-6)' }}>
-          {generationMode === 'svg' ? (
-            <button className="btn btn-secondary" style={{ width: '100%' }} onClick={generateAISVG}>
-              🧩 Generate AI SVG (preview)
-            </button>
-          ) : (
-            <button className="btn btn-secondary" style={{ width: '100%' }} onClick={generateAIImage}>
-              🖼️ Generate AI Image (preview)
-            </button>
-          )}
-        </div>
+        {/* Inline loader under button for extra visibility when generating */}
+        {isGenerating && (
+          <div style={{ marginTop: 'var(--spacing-3)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Spinner size={22} />
+            <div style={{ fontSize: 13 }}>Generating AI suggestions…</div>
+          </div>
+        )}
+
+  {/* AI Output Mode controls removed as requested */}
 
         {aiGeneratedImages.length > 0 && (
           <div style={{ marginTop: 'var(--spacing-4)' }}>
@@ -1939,21 +1972,7 @@ const deleteSelectedImage = () => {
           </div>
         )}
 
-        <h4>Templates</h4>
-        <div className="template-grid">
-          {templates.map(template => (
-            <div
-              key={template.id}
-              className={`template-item ${design.template === template.id ? 'active' : ''}`}
-              onClick={() => handleDesignChange('template', template.id)}
-            >
-              <div style={{ padding: 'var(--spacing-2)', textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem' }}>{template.preview}</div>
-                <div style={{ fontSize: '0.75rem' }}>{template.name}</div>
-              </div>
-            </div>
-          ))}
-        </div>
+  {/* Small Templates grid removed per request; main Template Library remains in the main area */}
 
   {/* Text-to-Image Generator removed: feature disabled in this build */}
 
