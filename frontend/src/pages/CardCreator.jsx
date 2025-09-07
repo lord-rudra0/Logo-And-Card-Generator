@@ -326,6 +326,8 @@ const CardCreator = () => {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationMode, setGenerationMode] = useState('svg') // 'svg' | 'png'
   const [aiGeneratedImages, setAiGeneratedImages] = useState([])
+  const [customPrompt, setCustomPrompt] = useState('')
+  const [hfPending, setHfPending] = useState(false)
 
   // Template library pagination
   const [templatesPage, setTemplatesPage] = useState(1)
@@ -376,7 +378,20 @@ const CardCreator = () => {
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
 
   // Left tools column collapsed state (compact rail)
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [leftCollapsed, setLeftCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('leftCollapsed') === '1'
+    } catch (_) {
+      return false
+    }
+  })
+  // Temporarily expand on hover without persisting
+  const [hoverExpanded, setHoverExpanded] = useState(false)
+
+  const setLeftCollapsedPersist = (val) => {
+    setLeftCollapsed(val)
+    try { localStorage.setItem('leftCollapsed', val ? '1' : '0') } catch (_) { }
+  }
 
   // Assets: background image and draggable images/logos
   const [bgImageUrl, setBgImageUrl] = useState('')
@@ -598,6 +613,117 @@ const deleteSelectedImage = () => {
       console.error('AI Image error:', err)
       alert(`Error generating AI Image: ${err.message}`)
     } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // Generate image using Stability with an optional user prompt.
+  // If no prompt is provided, use a professional fallback prompt that works without cardData.
+  const generateWithStability = async () => {
+    const fallback = `A beautiful, professional business card design, clean minimal layout, high-quality, vector-friendly, centered composition, suitable for a professional in any field.`
+    const usePrompt = (customPrompt && customPrompt.trim().length >= 3) ? customPrompt.trim() : fallback
+    setIsGenerating(true)
+    try {
+      const res = await fetch('/api/generate-card-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'stability',
+          prompt: usePrompt,
+          size: { width: cardWidth, height: cardHeight }
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Failed to generate image')
+      const imgs = data?.images || []
+      const normalized = imgs.map((it) => (typeof it === 'string' ? { source: 'stability', dataUrl: it } : { source: it.source || 'stability', dataUrl: it.dataUrl || it }))
+      setAiGeneratedImages(normalized)
+    } catch (err) {
+      console.error('Stability generate error:', err)
+      alert(`Error generating Stability image: ${err.message}`)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // Combined flow (Gemini-guided + Stability): requires cardData; backend will craft a detailed
+  // prompt using the provided cardData and request Stability + logo/HF outputs. This button is
+  // labeled as a professional generator and placed next to the 'Generate AI Design' control.
+  const generateProfessional = async () => {
+    if (!cardData.name || !cardData.company) {
+      alert('Please provide at least name and company for the professional generation.')
+      return
+    }
+    // Progressive flow: request a Stability image immediately (fast), then request the
+    // combined (Gemini->HF+Stability) job and append HF results when they arrive.
+    setIsGenerating(true)
+    setHfPending(true)
+    // Build a short prompt from cardData to give Stability something meaningful quickly
+    const shortPrompt = `Professional business card for ${cardData.name} - ${cardData.title || ''} at ${cardData.company}. Clean, modern layout, high quality, well-balanced typography, subtle brand colors, minimal iconography.`
+
+    // Helper to normalize image entries
+    const normalizeImgs = (imgs, defaultSource = 'stability') => (imgs || []).map((it) => {
+      if (typeof it === 'string') return { source: defaultSource, dataUrl: it }
+      return { source: it.source || defaultSource, dataUrl: it.dataUrl || it }
+    })
+
+    // Helper to merge without duplicates (by dataUrl)
+    const mergeUnique = (existing, incoming) => {
+      const seen = new Set(existing.map(i => i.dataUrl))
+      const merged = [...existing]
+      for (const it of incoming) {
+        if (!it || !it.dataUrl) continue
+        if (!seen.has(it.dataUrl)) {
+          merged.push(it)
+          seen.add(it.dataUrl)
+        }
+      }
+      return merged
+    }
+
+    try {
+      // 1) Fast Stability-only request to show something quickly
+      try {
+        const stabRes = await fetch('/api/generate-card-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'stability', prompt: shortPrompt, size: { width: cardWidth, height: cardHeight } })
+        })
+        const stabData = await stabRes.json().catch(() => ({}))
+        if (stabRes.ok) {
+          const stabImgs = normalizeImgs(stabData?.images || stabData || [], 'stability')
+          if (stabImgs.length > 0) setAiGeneratedImages(prev => mergeUnique(prev, stabImgs))
+        } else {
+          // Non-fatal: continue to combined step even if stability quick image failed
+          console.warn('Stability quick image failed:', stabData?.error || stabRes.status)
+        }
+      } catch (sErr) {
+        console.warn('Stability quick fetch error:', sErr)
+      }
+
+      // 2) Fire the combined job (Gemini -> Stability + HF). When it returns, append HF images.
+      try {
+        const res = await fetch('/api/generate-card-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'combined', cardData, industry: getIndustryFromData(), size: { width: cardWidth, height: cardHeight } })
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          // If the combined call failed, surface a console warning but keep stability images
+          console.warn('Combined generate failed:', data?.error || res.status)
+          throw new Error(data?.error || 'Failed combined generation')
+        }
+        const imgs = normalizeImgs(data?.images || [], 'unknown')
+        // Append any images not already present (HF or additional stability variants)
+        setAiGeneratedImages(prev => mergeUnique(prev, imgs))
+      } catch (err) {
+        console.error('Professional generate error (combined):', err)
+        // show a non-blocking alert but keep stability images visible
+        alert(`Warning: some AI images failed to generate: ${err.message}`)
+      }
+    } finally {
+      setHfPending(false)
       setIsGenerating(false)
     }
   }
@@ -1067,19 +1193,23 @@ const deleteSelectedImage = () => {
   return (
     <div className="creator-container">
       {/* Left tools column (collapsible) */}
-      <div className="creator-leftbar animate-fade-up animate-delay-1" style={{ width: leftCollapsed ? 64 : 'auto' }}>
-        {leftCollapsed ? (
+      <div
+        className="creator-leftbar animate-fade-up animate-delay-1"
+        style={{ width: leftCollapsed && !hoverExpanded ? 64 : 'auto' }}
+        onMouseEnter={() => { if (leftCollapsed) setHoverExpanded(true) }}
+        onMouseLeave={() => { if (leftCollapsed) setHoverExpanded(false) }}
+      >
+        {leftCollapsed && !hoverExpanded ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: 8 }}>
-            <button className="btn btn-secondary" title="Expand" onClick={() => setLeftCollapsed(false)}>➤</button>
+            <button className="btn btn-secondary" title="Expand" onClick={() => setLeftCollapsedPersist(false)}>➤</button>
             <div style={{ display: 'grid', gap: 8 }}>
+              {/* compact rail icons - curated set */}
               <button className="btn" title="Assets">📁</button>
               <button className="btn" title="Colors">🎨</button>
-              <button className="btn" title="Icons">🔣</button>
-              <button className="btn" title="Layout">📐</button>
-              <button className="btn" title="Size">📏</button>
+              <button className="btn" title="Templates">�️</button>
+              <button className="btn" title="Logos">�️</button>
               <button className="btn" title="Typography">🔤</button>
-              <button className="btn" title="Background">🖼️</button>
-              <button className="btn" title="Positioning">📌</button>
+              <button className="btn" title="Settings">⚙️</button>
             </div>
           </div>
         ) : (
@@ -1457,7 +1587,7 @@ const deleteSelectedImage = () => {
         {/* Icon Picker modal */}
         <IconPicker open={iconPickerOpen} onClose={() => setIconPickerOpen(false)} onSelect={addIcon} />
           </>
-        )}
+  )}
       </div>
 
       <div className="creator-main animate-fade-up animate-delay-2">
@@ -1902,15 +2032,32 @@ const deleteSelectedImage = () => {
           />
         </div>
 
-        <div style={{ marginBottom: 'var(--spacing-6)' }}>
-          <button 
-            onClick={generateAIDesign} 
-            className="btn btn-primary" 
-            style={{ width: '100%' }}
+        <div style={{ marginBottom: 'var(--spacing-6)', display: 'flex', gap: 8 }}>
+          <button
+            onClick={generateAIDesign}
+            className="btn btn-secondary"
+            style={{ flex: 1 }}
             disabled={isGenerating}
           >
-            {isGenerating ? '🤖 Generating...' : '✨ Generate AI Design'}
+            {isGenerating ? '🤖 Generating...' : 'Generate style'}
           </button>
+          <button
+            onClick={generateProfessional}
+            className="btn btn-primary"
+            style={{ flex: 1 }}
+            disabled={isGenerating}
+          >
+            {isGenerating ? '🤖 Generating...' : '✨ Generate AI Design Card'}
+          </button>
+        </div>
+
+        {/* Custom prompt + Stability button (prompt optional) */}
+        <div style={{ marginBottom: 'var(--spacing-4)' }}>
+          <label className="form-label">Custom prompt (optional)</label>
+          <textarea className="input" rows={3} value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)} placeholder="Optional: enter a detailed prompt for Stability or leave blank for a professional default..." />
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button className="btn btn-primary" onClick={generateWithStability} disabled={isGenerating}>Generate with Stability</button>
+          </div>
         </div>
 
         {/* Sidebar: show AI suggestions immediately under the Generate button */}
@@ -1955,7 +2102,15 @@ const deleteSelectedImage = () => {
                 <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'var(--panel-muted)', padding: 8, borderRadius: 8 }}>
                   <img src={img.dataUrl} alt={`ai-${idx}`} style={{ width: 120, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(255,255,255,0.06)' }} />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-                    <div style={{ fontSize: 12, opacity: 0.9 }}>{img.source}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ fontSize: 12, opacity: 0.9, textTransform: 'capitalize' }}>{img.source}</div>
+                      {hfPending && img.source !== 'stability' && (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.03)', padding: '4px 8px', borderRadius: 999 }}>
+                          <Spinner size={14} />
+                          <div style={{ fontSize: 11 }}>HF pending</div>
+                        </div>
+                      )}
+                    </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button className="btn btn-primary" onClick={() => {
                         // Apply: set preview background image to generated image
@@ -1968,6 +2123,12 @@ const deleteSelectedImage = () => {
                   </div>
                 </div>
               ))}
+              {hfPending && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: 8, borderRadius: 8 }}>
+                  <Spinner size={20} />
+                  <div style={{ fontSize: 13 }}>Generating additional images from the base model—these will appear below when ready.</div>
+                </div>
+              )}
             </div>
           </div>
         )}

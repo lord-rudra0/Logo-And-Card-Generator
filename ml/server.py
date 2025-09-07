@@ -10,7 +10,10 @@ import asyncio
 
 # Stability.ai fallback configuration (set STABILITY_API_KEY in environment; do NOT hardcode keys)
 STABILITY_API_KEY = os.environ.get('STABILITY_API_KEY')
-STABILITY_MODEL = os.environ.get('STABILITY_MODEL', 'stable-diffusion-v1')
+# Prefer an explicit STABILITY_MODEL; if absent, allow using HUGGINGFACE_MODEL
+# (useful when HUGGINGFACE_MODEL is set to a Stability model slug like
+# 'stabilityai/stable-diffusion-xl-base-1.0'). Fall back to a sensible default.
+STABILITY_MODEL = os.environ.get('STABILITY_MODEL') or os.environ.get('HUGGINGFACE_MODEL') or 'stable-diffusion-v1'
 HF_FALLBACK_AFTER = float(os.environ.get('HF_FALLBACK_AFTER', 60.0))
 
 # Load environment from ml/.env if present. Attempts to use python-dotenv first,
@@ -299,12 +302,30 @@ async def generate_logo(req: GenerateLogoRequest):
 
     url = f'https://api-inference.huggingface.co/models/{model}'
     headers = {'Authorization': f'Bearer {hf_token}'}
+
+    # Ensure HF-friendly dimensions: round/upscale to HF_DIM_STEP (default 64)
+    try:
+        hf_step = int(os.environ.get('HF_DIM_STEP', 64))
+    except Exception:
+        hf_step = 64
+
+    try:
+        orig_w = int(req.width or 512)
+        orig_h = int(req.height or 512)
+    except Exception:
+        orig_w, orig_h = 512, 512
+
+    hf_w = int(math.ceil(orig_w / float(hf_step)) * hf_step)
+    hf_h = int(math.ceil(orig_h / float(hf_step)) * hf_step)
+    if hf_w != orig_w or hf_h != orig_h:
+        print(f"Adjusted HF dimensions {orig_w}x{orig_h} -> {hf_w}x{hf_h} using HF_DIM_STEP={hf_step}")
+
     payload = {
         'inputs': req.prompt,
         'options': { 'wait_for_model': True },
         'parameters': {
-            'width': req.width,
-            'height': req.height,
+            'width': hf_w,
+            'height': hf_h,
             'num_inference_steps': req.steps,
             'guidance_scale': req.guidance_scale
         }
@@ -385,6 +406,8 @@ async def generate_logo(req: GenerateLogoRequest):
                 print('Returning image from Hugging Face')
                 return { 'images': [data_url], 'source': 'huggingface' }
 
+
+    # end of HF-based generate_logo
             except (httpx.ReadTimeout, httpcore.ReadTimeout) as e:
                 last_exc = e
                 print(f"HF read timeout on attempt {attempt}: {e}")
@@ -450,51 +473,71 @@ async def generate_logo(req: GenerateLogoRequest):
         raise HTTPException(status_code=502, detail=f'HuggingFace inference failed: {str(last_exc)}')
 
 
-    # New endpoint: direct Stability Platform generation using platform API key from ml/.env
+@app.post('/generate/card')
+async def generate_card(req: GenerateLogoRequest):
+    """Compatibility endpoint: generate a full business-card raster image using the
+    same HF inference code as `/generate/logo`. We keep a separate route so the
+    backend can clearly request "card" images (not logos).
+    """
+    # Reuse the existing generate_logo handler to avoid duplicating HF logic.
+    result = await generate_logo(req)
+    # Normalize the source name for clarity
+    if isinstance(result, dict):
+        result.setdefault('source', 'hf_card')
+    return result
+
+
+# New endpoint: direct Stability Platform generation using platform API key from ml/.env
+try:
+    from .stability_client import generate_stability_image
+except Exception:
+    # relative import fallback for direct execution
     try:
-        from .stability_client import generate_stability_image
+        from stability_client import generate_stability_image
     except Exception:
-        # relative import fallback for direct execution
-        try:
-            from stability_client import generate_stability_image
-        except Exception:
-            generate_stability_image = None
+        generate_stability_image = None
 
 
-    class StabilityRequest(BaseModel):
-        prompt: str
-        width: Optional[int] = 512
-        height: Optional[int] = 512
-        steps: Optional[int] = 20
-        cfg_scale: Optional[float] = 7.5
-        samples: Optional[int] = 1
+class StabilityRequest(BaseModel):
+    prompt: str
+    width: Optional[int] = 512
+    height: Optional[int] = 512
+    steps: Optional[int] = 20
+    cfg_scale: Optional[float] = 7.5
+    samples: Optional[int] = 1
 
 
-    @app.post('/generate/stability')
-    async def generate_stability(req: StabilityRequest):
-        if not generate_stability_image:
-            raise HTTPException(status_code=501, detail='Stability client not available on this server')
-        try:
-            images = await generate_stability_image(
-                prompt=req.prompt,
-                width=req.width or 512,
-                height=req.height or 512,
-                steps=req.steps or 20,
-                cfg_scale=req.cfg_scale or 7.5,
-                samples=req.samples or 1,
-            )
-            return { 'images': images, 'source': 'stability' }
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f'Stability generation failed: {str(e)}')
-"""
-ML service removed
+@app.post('/generate/stability')
+async def generate_stability(req: StabilityRequest):
+    if not generate_stability_image:
+        raise HTTPException(status_code=501, detail='Stability client not available on this server')
+    try:
+        # Enforce Stability minimum pixel count (e.g. 512x512 = 262144 px). If
+        # the client requests a smaller resolution, scale up proportionally to
+        # meet the minimum while preserving aspect ratio. Round dimensions to
+        # the model-required granularity (default 64 for newer Stability models).
+        min_pixels = int(os.environ.get('STABILITY_MIN_PIXELS', 262144))
+        req_w = int(req.width or 512)
+        req_h = int(req.height or 512)
+        cur_pixels = req_w * req_h
+        out_w, out_h = req_w, req_h
+        if cur_pixels < min_pixels:
+            scale = (min_pixels / float(cur_pixels)) ** 0.5
+            # Use granularity step (most Stability models require dims in
+            # increments of 64; make it configurable via STABILITY_DIM_STEP).
+            step = int(os.environ.get('STABILITY_DIM_STEP', 64))
+            out_w = int(math.ceil((req_w * scale) / float(step)) * step)
+            out_h = int(math.ceil((req_h * scale) / float(step)) * step)
+            print(f"Scaling Stability request {req_w}x{req_h} -> {out_w}x{out_h} to meet min pixels={min_pixels}")
 
-This file previously hosted a FastAPI-based ML service used for text-to-image
-and logo generation. The ML components were removed from this repository.
-
-If you need to re-enable ML features in the future, restore this file from
-your previous VCS history or implement an external service and update the
-backend proxies accordingly.
-"""
-
-# Intentionally left as a placeholder to keep the path available for history.
+        images = await generate_stability_image(
+            prompt=req.prompt,
+            width=out_w,
+            height=out_h,
+            steps=req.steps or 20,
+            cfg_scale=req.cfg_scale or 7.5,
+            samples=req.samples or 1,
+        )
+        return { 'images': images, 'source': 'stability', 'width': out_w, 'height': out_h }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f'Stability generation failed: {str(e)}')

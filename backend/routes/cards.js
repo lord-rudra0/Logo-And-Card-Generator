@@ -86,11 +86,21 @@ router.post('/generate-card-svg', async (req, res) => {
 // Generate AI business card as raster image (PNG/JPG) via Google Image provider
 router.post('/generate-card-image', async (req, res) => {
   try {
-    const { cardData, industry, size } = req.body || {}
+    const { cardData, industry, size, mode } = req.body || {}
     const genAI = req.app.locals.genAI
 
-    if (!cardData || !cardData.name || !cardData.company) {
-      return res.status(400).json({ error: 'cardData.name and cardData.company are required' })
+    // Validation rules:
+    // - Stability-only mode can run without cardData (user may supply a prompt instead)
+    // - Combined mode requires cardData with name/company so we can craft a detailed prompt
+    // - Default behavior (no mode) requires cardData
+    if (mode === 'combined') {
+      if (!cardData || !cardData.name || !cardData.company) {
+        return res.status(400).json({ error: 'cardData.name and cardData.company are required for combined generation' })
+      }
+    } else if (mode !== 'stability') {
+      if (!cardData || !cardData.name || !cardData.company) {
+        return res.status(400).json({ error: 'cardData.name and cardData.company are required' })
+      }
     }
 
     // If a Python ML service is configured, proxy the request and request both
@@ -99,43 +109,81 @@ router.post('/generate-card-image', async (req, res) => {
     const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
     if (PY_ML_URL) {
       try {
-        const prompt = `A high-quality business card layout for ${cardData.name} at ${cardData.company}. Title: ${cardData.title || ''}. Contact: ${cardData.email || ''} ${cardData.phone || ''}. Style: clean, minimal, vector-friendly, centered composition. Include company name or initials as a visible element.`
         const width = (size && size.width) || 1050
         const height = (size && size.height) || 600
 
-        const stabilityPayload = { prompt, width, height, steps: 20, cfg_scale: 7.5, samples: 1 }
-        const logoPayload = { prompt, width, height, steps: 20, guidance_scale: 7.5 }
-
         const stabilityUrl = `${PY_ML_URL.replace(/\/$/, '')}/generate/stability`
-        const logoUrl = `${PY_ML_URL.replace(/\/$/, '')}/generate/logo`
+  const cardUrl = `${PY_ML_URL.replace(/\/$/, '')}/generate/card`
 
-        const [stabRes, logoRes] = await Promise.all([
-          fetch(stabilityUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stabilityPayload) }),
-          fetch(logoUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(logoPayload) })
-        ])
-
-        const stabJson = stabRes.ok ? await stabRes.json() : { error: await stabRes.text(), ok: false }
-        const logoJson = logoRes.ok ? await logoRes.json() : { error: await logoRes.text(), ok: false }
-
-        // Normalize images into array of { source, dataUrl }
-        const images = []
-        if (stabJson && Array.isArray(stabJson.images)) {
-          stabJson.images.forEach((d) => images.push({ source: 'stability', dataUrl: d }))
-        } else if (stabJson && stabJson.images && typeof stabJson.images === 'string') {
-          images.push({ source: 'stability', dataUrl: stabJson.images })
-        }
-        if (logoJson && Array.isArray(logoJson.images)) {
-          logoJson.images.forEach((d) => images.push({ source: 'hf_or_logo', dataUrl: d }))
-        } else if (logoJson && logoJson.images && typeof logoJson.images === 'string') {
-          images.push({ source: 'hf_or_logo', dataUrl: logoJson.images })
+        // If client requested Stability-only generation with a custom prompt
+        if (req.body && req.body.mode === 'stability') {
+          const usePrompt = (req.body.prompt && req.body.prompt.toString().trim().length) ? req.body.prompt : `A high-quality business card layout for ${cardData.name} at ${cardData.company}. Title: ${cardData.title || ''}. Contact: ${cardData.email || ''} ${cardData.phone || ''}. Style: clean, minimal, vector-friendly, centered composition. Include company name or initials as a visible element.`
+          const stabilityPayload = { prompt: usePrompt, width, height, steps: 20, cfg_scale: 7.5, samples: 1 }
+          const stabRes = await fetch(stabilityUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stabilityPayload) })
+          const stabJson = stabRes.ok ? await stabRes.json() : { error: await stabRes.text(), ok: false }
+          const images = []
+          if (stabJson && Array.isArray(stabJson.images)) stabJson.images.forEach(d => images.push({ source: 'stability', dataUrl: d }))
+          else if (stabJson && stabJson.images && typeof stabJson.images === 'string') images.push({ source: 'stability', dataUrl: stabJson.images })
+          if (images.length === 0) return res.status(502).json({ error: 'Stability returned no images', details: stabJson })
+          return res.json({ success: true, images })
         }
 
-        // If nothing returned, fallback to aiService (non-ML) placeholder or error
-        if (images.length === 0) {
-          return res.status(502).json({ error: 'ML service returned no images', details: { stability: stabJson, logo: logoJson } })
-        }
+        // Combined mode: craft a Gemini prompt server-side (if available) and request both stability and logo generator
+        if (req.body && req.body.mode === 'combined') {
+          let craftedPrompt = `A high-quality business card layout for ${cardData.name} at ${cardData.company}. Title: ${cardData.title || ''}. Contact: ${cardData.email || ''} ${cardData.phone || ''}. Style: clean, minimal, vector-friendly, centered composition. Include company name or initials as a visible element.`
+          try {
+            if (genAI) {
+              const designs = await generateCardDesign(genAI, cardData, industry || 'business', 1)
+              if (Array.isArray(designs) && designs.length > 0) {
+                const d = designs[0]
+                const extras = []
+                if (d.palette) extras.push(`colors: ${d.palette.primary || ''} / ${d.palette.secondary || ''}`)
+                if (d.typography) extras.push(`font: ${d.typography.heading || d.typography.body || ''}`)
+                if (d.layout && d.layout.elements) extras.push(`layout intent: ${Object.keys(d.layout.elements).join(', ')}`)
+                craftedPrompt = `${craftedPrompt} Additional style hints: ${extras.join('; ')}.`
+              }
+            }
+          } catch (gpErr) {
+            console.warn('Gemini prompt craft failed, using fallback prompt', gpErr)
+          }
 
-        return res.json({ success: true, images })
+          const stabilityPayload = { prompt: craftedPrompt, width, height, steps: 20, cfg_scale: 7.5, samples: 1 }
+          const cardPayload = { prompt: craftedPrompt, width, height, steps: 20, guidance_scale: 7.5 }
+
+          const [stabRes, cardRes] = await Promise.all([
+            fetch(stabilityUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stabilityPayload) }),
+            fetch(cardUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cardPayload) })
+          ])
+
+          const stabJson = stabRes.ok ? await stabRes.json() : { error: await stabRes.text(), ok: false }
+          const cardJson = cardRes.ok ? await cardRes.json() : { error: await cardRes.text(), ok: false }
+
+          const images = []
+          const stabilityImages = []
+          const hfImages = []
+
+          if (stabJson && Array.isArray(stabJson.images)) stabJson.images.forEach(d => stabilityImages.push({ source: 'stability', dataUrl: d }))
+          else if (stabJson && stabJson.images && typeof stabJson.images === 'string') stabilityImages.push({ source: 'stability', dataUrl: stabJson.images })
+
+          if (cardJson && Array.isArray(cardJson.images)) cardJson.images.forEach(d => hfImages.push({ source: 'hf_card', dataUrl: d }))
+          else if (cardJson && cardJson.images && typeof cardJson.images === 'string') hfImages.push({ source: 'hf_card', dataUrl: cardJson.images })
+
+          // Prefer showing stability images first, then HF images
+          stabilityImages.forEach(i => images.push(i))
+          hfImages.forEach(i => images.push(i))
+
+          // If at least one image succeeded, return 200 with available images and diagnostic details.
+          if (images.length > 0) {
+            // Log if HF failed so we can debug later
+            if ((cardJson && cardJson.error) || !cardRes.ok) {
+              console.warn('HF/card generation failed or returned non-OK status', { status: cardRes.status, body: cardJson })
+            }
+            return res.json({ success: true, images, details: { stability: stabJson, card: cardJson } })
+          }
+
+          // No images at all from either service — bubble up diagnostic info
+          return res.status(502).json({ error: 'Combined generation returned no images', details: { stability: stabJson, card: cardJson } })
+        }
       } catch (e) {
         console.error('Error proxying to Python ML service:', e)
         // fall through to fallback
