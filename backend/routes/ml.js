@@ -8,10 +8,28 @@ const router = express.Router()
 
 const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
 
-const proxyToPython = async (path, payload) => {
+// Simple request-id middleware and proxy helper that forwards the id
+const generateReqId = () => {
+  return `req_${Math.random().toString(36).slice(2, 9)}`
+}
+
+// Attach request-id to each incoming request if missing
+router.use((req, res, next) => {
+  const incoming = req.headers['x-request-id'] || req.headers['x_correlation_id'] || null
+  req.requestId = incoming || generateReqId()
+  res.setHeader('X-Request-Id', req.requestId)
+  next()
+})
+
+const proxyToPython = async (path, payload, options = {}) => {
   if (!PY_ML_URL) throw new Error('Python ML service not configured')
   const url = `${PY_ML_URL.replace(/\/$/, '')}/${path.replace(/^\//, '')}`
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+  const headers = { 'Content-Type': 'application/json' }
+  const requestId = options.requestId || (options.req && options.req.requestId) || null
+  if (requestId) headers['X-Request-Id'] = requestId
+  // include requestId in body metadata when possible for easier tracing
+  const body = Object.assign({}, payload, { _meta: Object.assign({}, payload._meta || {}, { requestId }) })
+  const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
   if (!r.ok) {
     const text = await r.text()
     throw new Error(`Python ML service error ${r.status}: ${text}`)
@@ -25,7 +43,7 @@ router.post('/recommend-style', async (req, res) => {
     const { industry, mood } = req.body || {}
     if (PY_ML_URL) {
       try {
-        const data = await proxyToPython('recommend-style', { industry, mood })
+  const data = await proxyToPython('recommend-style', { industry, mood }, { req })
         return res.json({ success: true, recommendation: data })
       } catch (e) {
         console.warn('Python ML proxy failed, falling back to JS:', e.message)
@@ -45,7 +63,7 @@ router.post('/check-accessibility', async (req, res) => {
     const { elements } = req.body || {}
     if (PY_ML_URL) {
       try {
-        const data = await proxyToPython('check-accessibility', { elements })
+  const data = await proxyToPython('check-accessibility', { elements }, { req })
         return res.json({ success: true, report: data })
       } catch (e) {
         console.warn('Python ML proxy failed, falling back to JS:', e.message)
@@ -66,7 +84,7 @@ router.post('/ocr', async (req, res) => {
     if (!imageBase64) return res.status(400).json({ success: false, error: 'imageBase64 is required' })
     if (PY_ML_URL) {
       try {
-        const data = await proxyToPython('ocr', { imageBase64 })
+  const data = await proxyToPython('ocr', { imageBase64 }, { req })
         return res.json({ success: true, ocr: data })
       } catch (e) {
         console.warn('Python ML proxy failed, falling back to JS:', e.message)
@@ -92,7 +110,7 @@ router.post('/generate-logo', async (req, res) => {
         if (!PY_ML_URL) throw new Error('Python ML service not configured')
         // preliminary progress
         updateProgress(5)
-        const data = await proxyToPython('generate/logo', payload)
+  const data = await proxyToPython('generate/logo', payload, { req })
         updateProgress(60)
         const imgs = data.images || data.generated_images || []
         const saved = imgs.map((d) => {
@@ -110,7 +128,7 @@ router.post('/generate-logo', async (req, res) => {
     }
     if (PY_ML_URL) {
       try {
-        const data = await proxyToPython('generate/logo', payload)
+  const data = await proxyToPython('generate/logo', payload, { req })
         // if data contains data.images or images as data URLs, save them to cache and return URLs
         const imgs = data.images || data.generated_images || []
         const saved = imgs.map((d) => {
@@ -162,20 +180,17 @@ router.post('/generate-logo-gemini', async (req, res) => {
     const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null
     const GEMINI_MODEL = process.env.GEMINI_MODEL || 'models/gemini-1.0'
     if (GEMINI_KEY) {
+      const companyToken = (companyName && String(companyName).trim()) || (initials && String(initials).trim()) || ''
       try {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta2/${GEMINI_MODEL}:generateText`
-        const promptText = `You are a professional logo designer and prompt engineer for image generation models. Given the following company brief, produce a concise but richly detailed Stable Diffusion / image-model prompt describing the composition, iconography, color palette, lighting, focal point, style, camera/angle, material details, and negative prompt (if needed).\n\nBrief:\n${brief}\n\nRespond only with the final prompt string.`
+        const promptText = `You are a professional logo designer and prompt engineer for image generation models. Given the following company brief, produce a concise but richly detailed Stable Diffusion / image-model prompt describing the composition, iconography, color palette, lighting, focal point, style, camera/angle, material details, and negative prompt (if needed). IMPORTANT: the final prompt must explicitly include the company name, the company's first word, or the company's initials (whichever is available) as a textual or graphical element in the logo description. If initials are provided, prefer using them as a dominant motif.\n\nBrief:\n${brief}\n\nRespond only with the final prompt string.`
         const r = await fetch(geminiUrl, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${GEMINI_KEY}`
+            'Authorization': `Bearer ${GEMINI_KEY}`,
+            'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            prompt: { text: promptText },
-            temperature: 0.2,
-            maxOutputTokens: 800
-          })
+          body: JSON.stringify({ prompt: promptText, maxOutputTokens: 800 })
         })
         if (r.ok) {
           const j = await r.json()
@@ -207,6 +222,21 @@ router.post('/generate-logo-gemini', async (req, res) => {
       detailedPrompt += `, industry: ${resolvedIndustry}. Style: ${style || 'modern, minimal'}, colors: ${primaryColor || 'primary'}, ${secondaryColor || 'secondary'}. Generate a detailed image description for a Stable Diffusion-style model including composition, focal point, iconography, background, lighting, material textures, and a short negative prompt.`
     }
 
+    // Server-side enforcement: if a company token (name or initials) was provided but isn't mentioned in the prompt,
+    // append an explicit instruction so the image-model prompt includes the company name/initials visibly.
+    if (companyToken) {
+      try {
+        const escaped = companyToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const hasToken = new RegExp(escaped, 'i').test(detailedPrompt)
+        if (!hasToken) {
+          detailedPrompt = detailedPrompt + ` Include the company name or initials: "${companyToken}" as a visible textual or graphical element (e.g., initials as a monogram) so the logo clearly references the brand.`
+        }
+      } catch (e) {
+        // if regex building fails for any reason, append a plain instruction
+        detailedPrompt = detailedPrompt + ` Include the company name or initials: "${companyToken}" as a visible textual or graphical element.`
+      }
+    }
+
     // Support async job creation: ?async=true
     const wantAsync = req.query && String(req.query.async) === 'true'
     const mlPayload = { prompt: detailedPrompt, count, width, height }
@@ -215,8 +245,8 @@ router.post('/generate-logo-gemini', async (req, res) => {
       const job = createJob(async (updateProgress) => {
         if (!PY_ML_URL) throw new Error('Python ML service not configured')
         updateProgress(5)
-        // send to python ml
-        const data = await proxyToPython('generate/logo', mlPayload)
+  // send to python ml
+  const data = await proxyToPython('generate/logo', mlPayload, { req })
         updateProgress(60)
         const imgs = data.images || data.generated_images || []
         const saved = imgs.map((d) => {
@@ -235,7 +265,7 @@ router.post('/generate-logo-gemini', async (req, res) => {
 
     // Synchronous path
     if (!PY_ML_URL) return res.status(501).json({ success: false, error: 'Python ML service not configured' })
-    const data = await proxyToPython('generate/logo', mlPayload)
+  const data = await proxyToPython('generate/logo', mlPayload, { req })
     const imgs = data.images || data.generated_images || []
     const saved = imgs.map((d) => {
       try {
