@@ -13,6 +13,15 @@ try:
     PIL_AVAILABLE = True
 except Exception:
     PIL_AVAILABLE = False
+try:
+    from .sr import super_resolve, ocr_text_from_bytes, _decode_data_url
+except Exception:
+    try:
+        from sr import super_resolve, ocr_text_from_bytes, _decode_data_url
+    except Exception:
+        super_resolve = None
+        ocr_text_from_bytes = None
+        _decode_data_url = None
 
 # Stability.ai fallback configuration (set STABILITY_API_KEY in environment; do NOT hardcode keys)
 STABILITY_API_KEY = os.environ.get('STABILITY_API_KEY')
@@ -340,6 +349,44 @@ async def ocr_endpoint(req: OCRRequest):
         return { 'error': 'pytesseract not available or failed to run. Install pytesseract and Tesseract OCR binary.', 'details': str(e) }
 
 
+
+class SRRequest(BaseModel):
+    imageBase64: str
+    mode: Optional[str] = 'auto'  # 'hf' | 'local' | 'auto'
+
+
+@app.post('/super-resolve')
+async def super_resolve_endpoint(req: SRRequest):
+    if not super_resolve:
+        raise HTTPException(status_code=501, detail='Super-resolution helper not available on this server')
+    try:
+        img_b = _decode_data_url(req.imageBase64) if req.imageBase64.startswith('data:') else base64.b64decode(req.imageBase64)
+    except Exception:
+        raise HTTPException(status_code=400, detail='invalid imageBase64')
+    try:
+        out_bytes = await super_resolve(img_b, mode=req.mode or 'auto')
+        return { 'image': 'data:image/png;base64,' + base64.b64encode(out_bytes).decode('utf-8') }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail='Super-resolve failed: ' + str(e))
+
+
+@app.post('/score')
+async def score_endpoint(req: SRRequest):
+    # returns OCR text and a naive score (length of extracted text)
+    if not ocr_text_from_bytes:
+        raise HTTPException(status_code=501, detail='OCR helper not available')
+    try:
+        img_b = _decode_data_url(req.imageBase64) if req.imageBase64.startswith('data:') else base64.b64decode(req.imageBase64)
+    except Exception:
+        raise HTTPException(status_code=400, detail='invalid imageBase64')
+    try:
+        text = ocr_text_from_bytes(img_b)
+        score = len(text.strip())
+        return { 'text': text, 'score': score }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail='OCR failed: ' + str(e))
+
+
 @app.post('/generate/logo')
 async def generate_logo(req: GenerateLogoRequest):
     # If local diffusers is requested and available, prefer it
@@ -463,11 +510,22 @@ async def generate_logo(req: GenerateLogoRequest):
                     return data
 
                 img_bytes = r.content
-                # optional post-process
-                try:
-                    img_bytes = _postprocess_image_bytes(img_bytes)
-                except Exception:
-                    pass
+                            # optional post-process
+                            try:
+                                img_bytes = _postprocess_image_bytes(img_bytes)
+                            except Exception:
+                                pass
+
+                            # optional super-resolution (POSTPROCESS_SR=1)
+                            try:
+                                do_sr = os.environ.get('POSTPROCESS_SR', '0')
+                                if str(do_sr).lower() in ('1', 'true', 'yes') and super_resolve:
+                                    try:
+                                        img_bytes = await super_resolve(img_bytes, mode=os.environ.get('POSTPROCESS_SR_MODE','hf'))
+                                    except Exception as e:
+                                        print('Super-resolve failed:', e)
+                            except Exception:
+                                pass
                 b64 = base64.b64encode(img_bytes).decode('utf-8')
                 data_url = f'data:image/png;base64,{b64}'
                 print('Returning image from Hugging Face')
