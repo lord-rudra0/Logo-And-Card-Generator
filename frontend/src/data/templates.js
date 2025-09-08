@@ -41,10 +41,11 @@ function pickShifted(arr, i, shift) { return arr[(i + shift) % arr.length] }
 function makeLayout(i) {
   return {
     elements: {
-      company: { position: pick(POSITIONS, i * 3 + 0), size: i % 5 === 0 ? 'large' : 'medium' },
-      name: { position: pick(POSITIONS, i * 5 + 1), size: (i % 4 === 0) ? 'x-large' : 'large' },
-      title: { position: pick(POSITIONS, i * 7 + 2), size: (i % 3 === 0) ? 'medium' : 'small' },
-      contacts: { position: pick(POSITIONS, i * 11 + 3), size: 'small' }
+  // Bias positions toward left/center columns and avoid extreme offsets that overflow
+  company: { position: pick(['top left','top center','center left','center'], i * 3 + 0), size: i % 5 === 0 ? 'large' : 'medium' },
+  name: { position: pick(['center left','center','top left','center right'], i * 5 + 1), size: (i % 4 === 0) ? 'x-large' : 'large' },
+  title: { position: pick(['center left','center right','bottom left','bottom center'], i * 7 + 2), size: (i % 3 === 0) ? 'medium' : 'small' },
+  contacts: { position: pick(['bottom left','bottom center','bottom right'], i * 11 + 3), size: 'small' }
     }
   }
 }
@@ -85,6 +86,8 @@ function makeItem(i) {
     id: `tpl_${i}`,
     name: `${template.charAt(0).toUpperCase() + template.slice(1)} ${i + 1}`,
     template,
+  // safeMargin in pixels from each edge to ensure text stays inside printable area
+  safeMargin: { top: 12, right: 12, bottom: 12, left: 12 },
     palette: {
       primary: pal.primary,
       secondary: pal.secondary,

@@ -923,12 +923,38 @@ const deleteSelectedImage = () => {
       setCompanySize(companyPx)
 
       let newPositions = { ...positions }
+      const safeMargin = (normalized.safeMargin) ? normalized.safeMargin : { top: 12, right: 12, bottom: 12, left: 12 }
+      const minX = safeMargin.left || 12
+      const minY = safeMargin.top || 12
+      const maxX = (cardWidth - (safeMargin.right || 12))
+      const maxY = (cardHeight - (safeMargin.bottom || 12))
+
       if (nameMeta.position) newPositions.name = positionToCoords(nameMeta.position)
       if (titleMeta.position) newPositions.title = positionToCoords(titleMeta.position)
       if (companyMeta.position) newPositions.company = positionToCoords(companyMeta.position)
       if (contactsMeta.position) newPositions.contacts = positionToCoords(contactsMeta.position)
+
       // De-overlap text blocks
       newPositions = resolveOverlaps(newPositions, { name: namePx, title: titlePx, company: companyPx })
+
+      // Clamp positions to safe margin and card bounds, and snap to grid if enabled
+      Object.keys(newPositions).forEach((k) => {
+        const v = newPositions[k]
+        if (!v || typeof v.x !== 'number' || typeof v.y !== 'number') return
+        let nx = v.x
+        let ny = v.y
+        if (snapToGrid) {
+          nx = snap(nx)
+          ny = snap(ny)
+        }
+        // Ensure we keep some spacing for typical text box widths (approx 160px)
+        const textBoxW = 160
+        const textBoxH = (k === 'name') ? namePx + 6 : (k === 'title') ? titlePx + 6 : (k === 'company') ? companyPx + 6 : 56
+        nx = clamp(nx, minX, Math.max(minX, maxX - Math.min(textBoxW, cardWidth - minX - 8)))
+        ny = clamp(ny, minY, Math.max(minY, maxY - Math.min(textBoxH, cardHeight - minY - 8)))
+        newPositions[k] = { x: nx, y: ny }
+      })
+
       setPositions(newPositions)
 
       // Adjust text alignment to better match template intent
