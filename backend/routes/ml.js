@@ -3,6 +3,7 @@ import fetch from 'node-fetch'
 import { recommendStyle, checkAccessibility, ocrFromImageBase64 } from '../services/mlService.js'
 import { forwardToPython } from '../services/pythonProxy.js'
 import { saveBase64Image, getCacheUrl } from '../services/imageCache.js'
+import { setLastLogo } from '../services/logoStore.js'
 import { createJob, getJob } from '../services/jobQueue.js'
 
 const router = express.Router()
@@ -110,6 +111,10 @@ router.post('/generate-logo', async (req, res) => {
             return { url: d, cached: false }
           }
         })
+        // Save the first saved image as the 'last logo' for this requestId so card flow can pick it up
+        if (saved && saved[0] && saved[0].url && req && req.requestId) {
+          try { setLastLogo(req.requestId, saved[0].url) } catch (_) {}
+        }
         updateProgress(95)
         return { raw: data, images: saved }
       })
@@ -128,6 +133,10 @@ router.post('/generate-logo', async (req, res) => {
             return { url: d, cached: false }
           }
         })
+        // Save first image as last logo for this requestId
+        if (saved && saved[0] && saved[0].url && req && req.requestId) {
+          try { setLastLogo(req.requestId, saved[0].url) } catch (_) {}
+        }
         return res.json({ success: true, data: { raw: data, images: saved } })
       } catch (e) {
         console.warn('Python ML proxy failed for generate-logo, error:', e.message)

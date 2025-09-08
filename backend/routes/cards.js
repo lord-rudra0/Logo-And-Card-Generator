@@ -1,6 +1,7 @@
 import express from 'express'
 import fetch from 'node-fetch'
 import { forwardToPython } from '../services/pythonProxy.js'
+import { getAndClearLastLogo } from '../services/logoStore.js'
 import { generateCardDesign, generateCardImage, generateCardSVG } from '../services/aiService.js'
 
 const router = express.Router()
@@ -115,8 +116,15 @@ router.post('/generate-card-image', async (req, res) => {
 
         // If client requested Stability-only generation with a custom prompt
         if (req.body && req.body.mode === 'stability') {
-          const usePrompt = (req.body.prompt && req.body.prompt.toString().trim().length) ? req.body.prompt : `Photoreal business card mockup and layout for ${cardData.name} (${cardData.title || ''}) at ${cardData.company}. Include company name or initials prominently. Style: clean, modern, print-ready, high-resolution, vector-friendly layout, consistent brand colors, balanced typography, clear hierarchy, readable at small sizes. Deliver front-facing card mockup as a flat, centered composition with neutral studio lighting, subtle paper texture, and a transparent or plain background suitable for catalog/print use. Avoid people, faces, landscapes, busy scenes, stock photo overlays, or unrelated photographic elements.`
-          const stabilityPayload = { prompt: usePrompt, width, height, steps: 20, cfg_scale: 7.5, samples: 1 }
+          const usePrompt = (req.body.prompt && req.body.prompt.toString().trim().length) ? req.body.prompt : `Photorealistic, print-ready business card mockup for ${cardData.name} (${cardData.title || ''}) at ${cardData.company}. Produce a front-facing, flat card layout (landscape) with correct safe margins and bleed, high-resolution suitable for 300 DPI print. Style: clean and professional with a strong typographic hierarchy (name prominent, title secondary, company/logo clearly visible), balanced spacing, and subtle paper texture. Use CMYK-friendly colors and vector-friendly logo placement. If a logo is provided, place it consistently (top-left or centered) keeping aspect ratio and clear spacing. Provide one full mockup and one close-up crop showing legible text. Prefer real fonts like Helvetica/Inter/Roboto for modern, or Garamond/Times for classic. Ensure text is sharp and readable, avoid AI text artifacts, misspellings, extra characters, or distorted typography. Use soft studio lighting, realistic shadows, and a neutral background suitable for product catalogs. Avoid people, faces, photos, busy scenes, watermarks, other brand logos, and noisy textures.`
+          const stabilityPayload = { prompt: usePrompt, width, height, steps: 28, cfg_scale: 8.0, samples: 1 }
+          // allow client to request using the last generated logo (attach and clear)
+          if (req.body && req.body.useLastLogo) {
+            try {
+              const l = getAndClearLastLogo(req.requestId)
+              if (l) stabilityPayload.logoUrl = l
+            } catch (_) {}
+          }
           // forward via helper which appends a default negative_prompt
           const stabJson = await forwardToPython('generate/stability', stabilityPayload, { req })
           const images = []
@@ -145,8 +153,18 @@ router.post('/generate-card-image', async (req, res) => {
             console.warn('Gemini prompt craft failed, using fallback prompt', gpErr)
           }
 
-          const stabilityPayload = { prompt: craftedPrompt, width, height, steps: 20, cfg_scale: 7.5, samples: 1 }
-          const cardPayload = { prompt: craftedPrompt, width, height, steps: 20, guidance_scale: 7.5 }
+          const stabilityPayload = { prompt: craftedPrompt, width, height, steps: 28, cfg_scale: 8.0, samples: 1 }
+          const cardPayload = { prompt: craftedPrompt, width, height, steps: 28, guidance_scale: 8.5 }
+          // allow client to request auto-attach of the last generated logo
+          if (req.body && req.body.useLastLogo) {
+            try {
+              const l = getAndClearLastLogo(req.requestId)
+              if (l) {
+                stabilityPayload.logoUrl = l
+                cardPayload.logoUrl = l
+              }
+            } catch (_) {}
+          }
 
           // Use helper to forward both requests and ensure negative_prompt appended
           const [stabJson, cardJson] = await Promise.all([

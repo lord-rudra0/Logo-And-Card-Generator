@@ -6,10 +6,10 @@ echo "Health check: $BASE_URL/health"
 curl -sS ${BASE_URL}/health | jq . || true
 
 echo "\nStability quick test (512x320):"
-curl -sS -X POST ${BASE_URL}/generate/stability -H 'Content-Type: application/json' -d '{"prompt":"Test business card graphic","width":512,"height":320}' | jq . || true
+curl -sS -X POST ${BASE_URL}/generate/stability -H 'Content-Type: application/json' -d '{"prompt":"Photorealistic, print-ready business card mockup for Alice Example, clean layout, legible text, subtle paper texture","width":512,"height":320}' | jq . || true
 
 echo "\nHF/card test (512x320):"
-curl -sS -X POST ${BASE_URL}/generate/card -H 'Content-Type: application/json' -d '{"prompt":"Test business card for Alice at Example Co","width":512,"height":320}' | jq . || true
+curl -sS -X POST ${BASE_URL}/generate/card -H 'Content-Type: application/json' -d '{"prompt":"Photorealistic business card for Alice Example at Example Co: front-facing flat mockup, clear typography, logo top-left, CMYK-friendly colors","width":512,"height":320}' | jq . || true
 
 echo "\nCompose prompt test:"
 curl -sS -X POST ${BASE_URL}/compose-prompt -H 'Content-Type: application/json' -d '{"name":"Alice Smith","title":"Product Designer","company":"Example Co","industry":"technology","mood":"professional","keywords":["minimal","flat","logo"]}' | jq . || true

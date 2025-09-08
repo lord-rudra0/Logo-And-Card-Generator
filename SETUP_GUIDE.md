@@ -173,6 +173,48 @@ curl http://localhost:5000/api/health
 ### Test Logo Generation (fallback)
 Logo generation via the previous ML service is no longer available. The backend provides non-ML placeholder/logo helpers; use the web UI or API endpoints under `/api/logos` and `/api/cards` for design features.
 
+## How to use (quick)
+
+Start backend (example):
+
+```bash
+cd backend
+# ensure backend/.env exists and contains GEMINI_API_KEY and PY_IMAGE_SERVICE_URL (if using external ML)
+npm install
+npm run dev
+```
+
+Start frontend (if using):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Example API calls:
+
+```bash
+# health check
+curl http://localhost:5000/api/health
+
+# text-to-image example
+curl -sS -X POST http://localhost:5000/api/text-to-image -H 'Content-Type: application/json' -d '{"prompt":"Photoreal business card mockup for Alice","width":512,"height":320}' | jq .
+
+# logo generation example
+curl -sS -X POST http://localhost:5000/api/ml/generate-logo -H 'Content-Type: application/json' -d '{"companyName":"Example Co","count":1}' | jq .
+```
+
+Quick logo → card flow
+
+```bash
+# 1) generate logo
+curl -sS -X POST http://localhost:5000/api/ml/generate-logo -H 'Content-Type: application/json' -d '{"companyName":"Example Co","count":1}' | jq .
+
+# 2) generate card and auto-attach last logo from the same request (useLastLogo:true)
+curl -sS -X POST http://localhost:5000/api/generate-card-image -H 'Content-Type: application/json' -d '{"cardData":{"name":"Alice Example","company":"Example Co"},"size":{"width":1024,"height":640},"useLastLogo":true}' | jq .
+```
+
 ## 8. Configuration Options
 
 *ML configuration options were removed with the ML service.*
