@@ -1228,6 +1228,48 @@ const deleteSelectedImage = () => {
     } catch (_) { /* ignore */ }
   }, [])
 
+  // Listen for QR codes created by the global QrGenerator modal and insert as an asset
+  useEffect(() => {
+    const handler = (e) => {
+      try {
+        const detail = (e && e.detail) ? e.detail : null
+        if (!detail || !detail.dataUrl) return
+        const id = detail.id || `qr_${Date.now()}`
+        const size = Number(detail.size || 64)
+        // Anchor bottom-right while respecting INNER_PADDING
+        const x = Math.max(INNER_PADDING + 8, cardWidth - INNER_PADDING - size)
+        const y = Math.max(INNER_PADDING + 8, cardHeight - INNER_PADDING - size)
+        const newQr = {
+          id,
+          src: detail.dataUrl,
+          x,
+          y,
+          width: size,
+          height: size,
+          rotation: 0,
+          shape: 'square',
+          // ensure numeric filter defaults so UI sliders don't crash
+          brightness: 1,
+          contrast: 1,
+          saturation: 1,
+          hue: 0,
+          opacity: 1
+        }
+
+        setImages(prev => {
+          const filtered = (prev || []).filter(it => !(it && it.id && it.id.startsWith && it.id.startsWith('qr_')))
+          return [...filtered, newQr]
+        })
+        setSelectedImageId(id)
+      } catch (err) {
+        console.error('Error handling qrCreated event:', err)
+      }
+    }
+
+    window.addEventListener('qrCreated', handler)
+    return () => window.removeEventListener('qrCreated', handler)
+  }, [cardWidth, cardHeight])
+
   const resetPositions = () => {
   const defaults = { name: { x: INNER_PADDING + 8, y: INNER_PADDING + 10 }, title: { x: INNER_PADDING + 8, y: INNER_PADDING + 50 }, company: { x: INNER_PADDING + 8, y: INNER_PADDING + 90 }, contacts: { x: INNER_PADDING + 8, y: cardHeight - INNER_PADDING - 80 } }
     setPositions(defaults)

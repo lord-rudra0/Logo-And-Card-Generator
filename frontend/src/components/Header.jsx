@@ -1,9 +1,12 @@
 import { Link } from 'react-router-dom'
+import { useState } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import QrGenerator from './QrGenerator'
 import './Header.css'
 
 const Header = () => {
   const { theme, toggleTheme } = useTheme()
+  const [qrOpen, setQrOpen] = useState(false)
 
   return (
     <header className="header">
@@ -23,6 +26,13 @@ const Header = () => {
           
           <div className="header-actions">
             <button 
+              onClick={() => setQrOpen(true)}
+              className="btn"
+              title="QR Generator"
+            >
+              📱 QR
+            </button>
+            <button 
               onClick={toggleTheme}
               className="theme-toggle"
               aria-label="Toggle theme"
@@ -32,6 +42,7 @@ const Header = () => {
           </div>
         </div>
       </div>
+      {qrOpen && <QrGenerator onClose={() => setQrOpen(false)} />}
     </header>
   )
 }
