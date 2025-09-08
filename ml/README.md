@@ -1,3 +1,29 @@
+CardGEN ML microservice
+
+Endpoints added by recent work:
+- GET /health
+- POST /compose-prompt  -> craft text-to-image prompt from structured card fields
+- POST /generate/logo    -> HF image generation (with local-diffusers fallback)
+- POST /generate/stability -> Stability.ai direct generation (with HF fallback)
+- POST /generate/multi   -> run prompt across Stability, HF, local
+- POST /generate/with-score -> multi + optional SR + OCR scoring, returns best
+- POST /super-resolve    -> SR helper (HF or local Real-ESRGAN)
+- POST /score            -> OCR scoring endpoint
+- POST /layout/suggest   -> rule-based layout suggestions
+- POST /vectorize        -> best-effort raster->SVG tracing (opencv fallback)
+- POST /icons/search     -> icon semantic/substring search using frontend list
+- POST /refine-style     -> image-to-image refinement (HF or local)
+
+Env variables of interest:
+- HUGGINGFACE_API_TOKEN / HF_TOKEN
+- HUGGINGFACE_MODEL, HUGGINGFACE_REFINE_MODEL, HF_SR_MODEL
+- STABILITY_API_KEY, STABILITY_MODEL
+- USE_LOCAL_DIFFUSION (1/true to enable local pipeline)
+- POSTPROCESS_SR (1 to enable SR postprocess), POSTPROCESS_SR_MODE ('hf'|'local'|'auto')
+
+Notes:
+- Many features are best-effort and require optional Python packages: pillow, httpx, pytesseract, diffusers, torch, realesrgan, opencv-python.
+- If optional packages aren't installed, endpoints will return informative errors or fallbacks.
 # ML service — CardGEN
 
 Quick notes to run and test the ML FastAPI service used by the backend.

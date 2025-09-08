@@ -239,6 +239,188 @@ class GenerateLogoRequest(BaseModel):
     guidance_scale: Optional[float] = 7.5
 
 
+class ComposePromptRequest(BaseModel):
+    name: Optional[str]
+    title: Optional[str]
+    company: Optional[str]
+    industry: Optional[str]
+    mood: Optional[str]
+    keywords: Optional[List[str]] = []
+
+
+@app.post('/compose-prompt')
+async def compose_prompt(req: ComposePromptRequest):
+    """Compose a rich text-to-image prompt from structured card fields.
+    Attempts to call a text-inference LLM (Hugging Face text-generation) if
+    HUGGINGFACE_API_TOKEN is present; otherwise falls back to a deterministic
+    template-based prompt.
+    """
+    # deterministic template fallback
+    def template():
+        parts = []
+        if req.name:
+            parts.append(f"business card for {req.name}")
+        if req.title:
+            parts.append(req.title)
+        if req.company:
+            parts.append(f"at {req.company}")
+        if req.industry:
+            parts.append(f"industry: {req.industry}")
+        if req.mood:
+            parts.append(f"mood: {req.mood}")
+        if req.keywords:
+            parts.append(', '.join(req.keywords))
+        base = ', '.join(parts) if parts else 'business card, minimalist, clean'
+        # add useful defaults for legibility and logo placement
+        base += ", high-resolution, clear legible text, centered logo area, simple color palette"
+        return base
+
+    hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
+    hf_model = os.environ.get('HUGGINGFACE_TEXT_MODEL') or os.environ.get('HUGGINGFACE_MODEL') or 'gpt2'
+    if not hf_token:
+        return { 'prompt': template(), 'source': 'template' }
+
+    # Call HF text-generation endpoint for a richer prompt
+    try:
+        url = f'https://api-inference.huggingface.co/models/{hf_model}'
+        headers = {'Authorization': f'Bearer {hf_token}'}
+        # craft a short instruction
+        instr = (
+            f"Compose a detailed, descriptive text-to-image prompt for a business card. "
+            f"Include layout hints: logo area, name prominence, readable contact text, color palette suggestions.\n\n"
+            f"Fields:\nName: {req.name or ''}\nTitle: {req.title or ''}\nCompany: {req.company or ''}\n"
+            f"Industry: {req.industry or ''}\nMood: {req.mood or ''}\nKeywords: {', '.join(req.keywords or [])}\n\n"
+            "Provide a single concise prompt optimized for image generation with emphasis on legibility."
+        )
+        payload = { 'inputs': instr, 'options': { 'wait_for_model': True }, 'parameters': { 'max_new_tokens': 200 } }
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            if r.status_code == 200:
+                data = r.json()
+                # HF text endpoints sometimes return a list of generations
+                if isinstance(data, list) and data:
+                    text = data[0].get('generated_text') or data[0].get('text') or str(data[0])
+                elif isinstance(data, dict):
+                    text = data.get('generated_text') or data.get('text') or str(data)
+                else:
+                    text = str(data)
+                return { 'prompt': text.strip(), 'source': 'huggingface' }
+            else:
+                return { 'prompt': template(), 'source': 'template', 'warning': f'HF text-gen status {r.status_code}' }
+    except Exception as e:
+        return { 'prompt': template(), 'source': 'template', 'warning': str(e) }
+
+
+@app.post('/generate/multi')
+async def generate_multi(req: GenerateLogoRequest):
+    """Run the same prompt across available providers: Stability, HuggingFace, and local diffusers.
+    Returns an ordered list of results with metadata.
+    """
+    results = []
+
+    # 1) Try Stability (best-effort)
+    if generate_stability_image:
+        try:
+            sreq = StabilityRequest(prompt=req.prompt, width=req.width, height=req.height, steps=req.steps)
+            sres = await generate_stability(sreq)
+            if isinstance(sres, dict):
+                sres.setdefault('provider', 'stability')
+            results.append(sres)
+        except Exception as e:
+            results.append({ 'error': 'stability_failed', 'details': str(e), 'provider': 'stability' })
+
+    # 2) Hugging Face
+    try:
+        hres = await generate_logo(req)
+        if isinstance(hres, dict):
+            hres.setdefault('provider', 'huggingface')
+        results.append(hres)
+    except Exception as e:
+        results.append({ 'error': 'hf_failed', 'details': str(e), 'provider': 'huggingface' })
+
+    # 3) local diffusers
+    if USE_LOCAL_DIFFUSION:
+        try:
+            lreq = GenerateLogoRequest(prompt=req.prompt, width=req.width, height=req.height, steps=req.steps)
+            lres = await generate_logo(lreq)
+            if isinstance(lres, dict):
+                lres.setdefault('provider', 'local')
+            results.append(lres)
+        except Exception as e:
+            results.append({ 'error': 'local_failed', 'details': str(e), 'provider': 'local' })
+
+    return { 'results': results }
+
+
+@app.post('/generate/with-score')
+async def generate_with_score(req: GenerateLogoRequest):
+    """Run multi-provider generation, optionally super-resolve each image, perform OCR scoring,
+    and return all results plus the best-picked image according to OCR length.
+    """
+    # Run multi-provider generation to get candidate images
+    multi = await generate_multi(req)
+    results = multi.get('results', []) if isinstance(multi, dict) else []
+
+    scored = []
+    for item in results:
+        # item can be dict with images list or an error dict
+        if not isinstance(item, dict) or 'images' not in item:
+            scored.append({ 'provider': item.get('provider') if isinstance(item, dict) else 'unknown', 'error': item.get('error') if isinstance(item, dict) else 'invalid' })
+            continue
+        try:
+            img_dataurl = item['images'][0]
+            img_bytes = _decode_data_url(img_dataurl) if img_dataurl.startswith('data:') else base64.b64decode(img_dataurl)
+        except Exception as e:
+            scored.append({ 'provider': item.get('provider','unknown'), 'error': 'invalid_image', 'details': str(e) })
+            continue
+
+        # optional SR
+        try:
+            do_sr = os.environ.get('POSTPROCESS_SR', '0')
+            if str(do_sr).lower() in ('1', 'true', 'yes') and super_resolve:
+                try:
+                    img_bytes = await super_resolve(img_bytes, mode=os.environ.get('POSTPROCESS_SR_MODE','hf'))
+                except Exception as e:
+                    print('SR failed for provider', item.get('provider'), str(e))
+        except Exception:
+            pass
+
+        # OCR scoring
+        score = 0
+        text = ''
+        if ocr_text_from_bytes:
+            try:
+                text = ocr_text_from_bytes(img_bytes)
+                score = len(text.strip())
+            except Exception as e:
+                print('OCR failed:', e)
+
+        scored.append({
+            'provider': item.get('provider','unknown'),
+            'image': 'data:image/png;base64,' + base64.b64encode(img_bytes).decode('utf-8'),
+            'ocr_text': text,
+            'score': score,
+            'meta': { k: v for k, v in item.items() if k != 'images' }
+        })
+
+    # pick best by score (highest OCR length); tiebreaker: prefer stability then huggingface then local
+    def provider_rank(p):
+        order = { 'stability': 0, 'huggingface': 1, 'local': 2 }
+        return order.get(p, 99)
+
+    best = None
+    for s in scored:
+        if 'score' not in s:
+            continue
+        if best is None:
+            best = s
+            continue
+        if s['score'] > best['score'] or (s['score'] == best['score'] and provider_rank(s.get('provider','')) < provider_rank(best.get('provider',''))):
+            best = s
+
+    return { 'candidates': scored, 'best': best }
+
+
 def pick_palette(industry: str):
     map_ = {
         'technology': ['#3b82f6', '#6366f1', '#06b6d4', '#06b6d4'],
@@ -510,22 +692,22 @@ async def generate_logo(req: GenerateLogoRequest):
                     return data
 
                 img_bytes = r.content
-                            # optional post-process
-                            try:
-                                img_bytes = _postprocess_image_bytes(img_bytes)
-                            except Exception:
-                                pass
+                # optional post-process
+                try:
+                    img_bytes = _postprocess_image_bytes(img_bytes)
+                except Exception:
+                    pass
 
-                            # optional super-resolution (POSTPROCESS_SR=1)
-                            try:
-                                do_sr = os.environ.get('POSTPROCESS_SR', '0')
-                                if str(do_sr).lower() in ('1', 'true', 'yes') and super_resolve:
-                                    try:
-                                        img_bytes = await super_resolve(img_bytes, mode=os.environ.get('POSTPROCESS_SR_MODE','hf'))
-                                    except Exception as e:
-                                        print('Super-resolve failed:', e)
-                            except Exception:
-                                pass
+                # optional super-resolution (POSTPROCESS_SR=1)
+                try:
+                    do_sr = os.environ.get('POSTPROCESS_SR', '0')
+                    if str(do_sr).lower() in ('1', 'true', 'yes') and super_resolve:
+                        try:
+                            img_bytes = await super_resolve(img_bytes, mode=os.environ.get('POSTPROCESS_SR_MODE','hf'))
+                        except Exception as e:
+                            print('Super-resolve failed:', e)
+                except Exception:
+                    pass
                 b64 = base64.b64encode(img_bytes).decode('utf-8')
                 data_url = f'data:image/png;base64,{b64}'
                 print('Returning image from Hugging Face')
@@ -702,3 +884,225 @@ async def generate_stability(req: StabilityRequest):
 
         # Not an engine/payment issue or no HF token available — surface original error
         raise HTTPException(status_code=502, detail=f'Stability generation failed: {err_text}')
+
+
+    class LayoutRequest(BaseModel):
+        width: Optional[int] = 1050
+        height: Optional[int] = 600
+        name: Optional[str]
+        title: Optional[str]
+        company: Optional[str]
+        logo_preference: Optional[str] = 'left'  # left|center|right
+
+
+    @app.post('/layout/suggest')
+    async def layout_suggest(req: LayoutRequest):
+        # Simple rule-based layout suggestions: return bounding boxes as percentages
+        w = int(req.width or 1050)
+        h = int(req.height or 600)
+        # Normalize to 0..1 box coords
+        boxes = {}
+        # logo box
+        if req.logo_preference == 'left':
+            boxes['logo'] = { 'x': 0.05, 'y': 0.2, 'w': 0.25, 'h': 0.6 }
+            text_x = 0.33
+        elif req.logo_preference == 'right':
+            boxes['logo'] = { 'x': 0.70, 'y': 0.2, 'w': 0.25, 'h': 0.6 }
+            text_x = 0.05
+        else:
+            boxes['logo'] = { 'x': 0.35, 'y': 0.05, 'w': 0.30, 'h': 0.30 }
+            text_x = 0.05
+
+        # name (prominent)
+        boxes['name'] = { 'x': text_x, 'y': 0.08, 'w': 0.60, 'h': 0.18 }
+        # title/company
+        boxes['title'] = { 'x': text_x, 'y': 0.28, 'w': 0.60, 'h': 0.12 }
+        boxes['company'] = { 'x': text_x, 'y': 0.42, 'w': 0.60, 'h': 0.10 }
+        # contact block bottom-left
+        boxes['contact'] = { 'x': 0.05, 'y': 0.65, 'w': 0.60, 'h': 0.25 }
+
+        return { 'width': w, 'height': h, 'boxes': boxes }
+
+
+    class VectorizeRequest(BaseModel):
+        imageBase64: str
+
+
+    @app.post('/vectorize')
+    async def vectorize(req: VectorizeRequest):
+        # Try to call potrace via python bindings or cv2 + skimage fallback.
+        try:
+            data = _decode_data_url(req.imageBase64) if req.imageBase64.startswith('data:') else base64.b64decode(req.imageBase64)
+        except Exception:
+            raise HTTPException(status_code=400, detail='invalid imageBase64')
+
+        # Try potrace (optional)
+        try:
+            import cv2
+            import numpy as np
+            # simple trace using OpenCV thresholds and contours -> convert to SVG path
+            nparr = np.frombuffer(data, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                raise Exception('cv2 failed to decode image')
+            _, th = cv2.threshold(img, 250, 255, cv2.THRESH_BINARY_INV)
+            contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # build a naive SVG
+            h, w = img.shape[:2]
+            paths = []
+            for cnt in contours:
+                pts = cnt.reshape(-1, 2)
+                d = 'M ' + ' L '.join([f"{int(x)},{int(y)}" for x, y in pts]) + ' Z'
+                paths.append(d)
+            svg = f"<svg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}'>" + ''.join([f"<path d='{p}' fill='black'/>" for p in paths]) + '</svg>'
+            return { 'svg': svg }
+        except Exception as e:
+            # Fallback: return informative message with recommended tools
+            return { 'error': 'vectorize_unavailable', 'details': str(e), 'note': 'Install opencv-python or potrace for vectorization; or export PNG and run external tracing.' }
+
+
+    class IconSearchRequest(BaseModel):
+        q: str
+        top_k: Optional[int] = 6
+
+
+    def _load_frontend_icons():
+        # Best-effort parser for frontend/src/data/icons.js to extract id and label
+        try:
+            path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'src', 'data', 'icons.js')
+            path = os.path.abspath(path)
+            if not os.path.exists(path):
+                return []
+            out = []
+            with open(path, 'r', encoding='utf-8') as fh:
+                txt = fh.read()
+            # crude parsing: find "id: '...'" and "label: '...'" occurrences within ICONS array
+            import re
+            entries = re.findall(r"\{([^}]+)\}", txt, flags=re.DOTALL)
+            for e in entries:
+                m_id = re.search(r"id\s*:\s*['\"]([\w-]+)['\"]", e)
+                m_label = re.search(r"label\s*:\s*['\"]([^'\"]+)['\"]", e)
+                if m_id and m_label:
+                    out.append({ 'id': m_id.group(1), 'label': m_label.group(1) })
+            return out
+        except Exception:
+            return []
+
+
+    @app.post('/icons/search')
+    async def icons_search(req: IconSearchRequest):
+        q = (req.q or '').strip().lower()
+        if not q:
+            return { 'results': [] }
+
+        icons = _load_frontend_icons()
+        if not icons:
+            return { 'results': [], 'warning': 'no frontend icons found' }
+
+        # If HF embeddings available, use them to rank; otherwise fallback to substring/fuzzy score
+        hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
+        try:
+            if hf_token:
+                # call embeddings endpoint for query and icon labels
+                model = os.environ.get('HF_EMBEDDING_MODEL') or 'sentence-transformers/all-MiniLM-L6-v2'
+                url = f'https://api-inference.huggingface.co/models/{model}'
+                headers = {'Authorization': f'Bearer {hf_token}'}
+                # prepare inputs: list of texts (first is query)
+                texts = [q] + [i['label'] for i in icons]
+                payload = { 'inputs': texts }
+                async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                    r = await client.post(url, headers=headers, json=payload)
+                    if r.status_code == 200:
+                        data = r.json()
+                        # expect list of vectors
+                        if isinstance(data, list) and len(data) >= 1:
+                            qvec = data[0]
+                            scores = []
+                            from math import sqrt
+                            def dot(a,b):
+                                return sum(x*y for x,y in zip(a,b))
+                            for i, lab in enumerate(icons):
+                                vec = data[i+1]
+                                # cosine similarity
+                                denom = (sqrt(dot(qvec,qvec))*sqrt(dot(vec,vec))) or 1.0
+                                sim = dot(qvec, vec) / denom
+                                scores.append((sim, lab))
+                            scores.sort(key=lambda x: x[0], reverse=True)
+                            results = [ { 'id': l['id'], 'label': l['label'], 'score': float(s) } for s,l in scores[:req.top_k] ]
+                            return { 'results': results }
+        except Exception as e:
+            print('Embeddings search failed:', e)
+
+        # fallback fuzzy substring scoring
+        def fuzzy_score(a, b):
+            a = a.lower(); b = b.lower()
+            if a == b: return 100
+            if a in b: return 80
+            if b in a: return 60
+            # partial match
+            import difflib
+            return int(difflib.SequenceMatcher(None, a, b).ratio() * 100)
+
+        scored = []
+        for ic in icons:
+            s = fuzzy_score(q, ic['label'])
+            scored.append((s, ic))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = [ { 'id': ic['id'], 'label': ic['label'], 'score': int(s) } for s, ic in scored[:req.top_k] ]
+        return { 'results': results }
+
+
+    class RefineRequest(BaseModel):
+        imageBase64: str
+        style_prompt: str
+        strength: Optional[float] = 0.6
+
+
+    @app.post('/refine-style')
+    async def refine_style(req: RefineRequest):
+        # decode image
+        try:
+            img_b = _decode_data_url(req.imageBase64) if req.imageBase64.startswith('data:') else base64.b64decode(req.imageBase64)
+        except Exception:
+            raise HTTPException(status_code=400, detail='invalid imageBase64')
+
+        # Prefer HF image-to-image or local refiner if available
+        hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
+        hf_model = os.environ.get('HUGGINGFACE_REFINE_MODEL') or os.environ.get('HUGGINGFACE_MODEL')
+        if hf_token and hf_model:
+            try:
+                url = f'https://api-inference.huggingface.co/models/{hf_model}'
+                headers = {'Authorization': f'Bearer {hf_token}'}
+                files = { 'image': ('input.png', img_b, 'image/png') }
+                data = { 'parameters': { 'prompt': req.style_prompt, 'strength': req.strength } }
+                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+                    r = await client.post(url, headers=headers, files=files, data=data)
+                    if r.status_code == 200:
+                        return { 'image': 'data:image/png;base64,' + base64.b64encode(r.content).decode('utf-8') }
+                    else:
+                        raise Exception(f'HF refine status {r.status_code} {r.text[:200]}')
+            except Exception as e:
+                print('HF refine failed:', e)
+
+        # Attempt local refine using diffusers refiner if available
+        if USE_LOCAL_DIFFUSION:
+            try:
+                # run a simple local refiner call in thread
+                def _local_refine():
+                    # this is a best-effort path; reuse loaded pipelines if available
+                    base, refiner = _load_local_pipelines(device=os.environ.get('LOCAL_DEVICE','cuda'))
+                    # load image into PIL
+                    from PIL import Image
+                    from io import BytesIO
+                    img = Image.open(BytesIO(img_b)).convert('RGB')
+                    out = refiner(image=img, prompt=req.style_prompt, strength=req.strength, num_inference_steps=30).images[0]
+                    buf = BytesIO()
+                    out.save(buf, format='PNG')
+                    return buf.getvalue()
+
+                out_bytes = await asyncio.to_thread(_local_refine)
+                return { 'image': 'data:image/png;base64,' + base64.b64encode(out_bytes).decode('utf-8') }
+            except Exception as e:
+                print('local refine failed:', e)
+
+        raise HTTPException(status_code=501, detail='No available refine model configured (set HUGGINGFACE_API_TOKEN and HUGGINGFACE_REFINE_MODEL or enable USE_LOCAL_DIFFUSION)')
