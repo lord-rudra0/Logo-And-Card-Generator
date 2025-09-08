@@ -4,6 +4,7 @@ from typing import List, Optional
 import math
 import os
 import base64
+import json
 import httpx
 import httpcore
 import asyncio
@@ -203,6 +204,36 @@ def _postprocess_image_bytes(img_bytes: bytes) -> bytes:
         return out_buf.read()
     except Exception as e:
         print('Post-processing failed:', e)
+        return img_bytes
+
+
+def _local_text_boost(img_bytes: bytes) -> bytes:
+    """Lightweight local enhancement to improve small text legibility without ML models.
+    Uses PIL autocontrast, binarization, and max-filter dilation to thicken strokes.
+    Returns PNG bytes.
+    """
+    if not PIL_AVAILABLE:
+        return img_bytes
+    try:
+        buf = BytesIO(img_bytes)
+        img = Image.open(buf).convert('L')
+        # increase contrast
+        img = ImageOps.autocontrast(img)
+        # simple threshold to b/w
+        img = img.point(lambda p: 255 if p > 128 else 0)
+        # apply a couple of MaxFilter passes to thicken strokes
+        try:
+            img = img.filter(ImageFilter.MaxFilter(3))
+            img = img.filter(ImageFilter.MaxFilter(3))
+        except Exception:
+            pass
+        out = img.convert('RGBA')
+        out_buf = BytesIO()
+        out.save(out_buf, format='PNG')
+        out_buf.seek(0)
+        return out_buf.read()
+    except Exception as e:
+        print('local_text_boost failed:', e)
         return img_bytes
 
 app = FastAPI(title='CardGEN ML PoC Service')
@@ -1085,7 +1116,7 @@ async def refine_style(req: RefineRequest):
             url = f'https://api-inference.huggingface.co/models/{hf_model}'
             headers = {'Authorization': f'Bearer {hf_token}'}
             files = { 'image': ('input.png', img_b, 'image/png') }
-            data = { 'parameters': { 'prompt': req.style_prompt, 'strength': req.strength } }
+            data = { 'parameters': json.dumps({ 'prompt': req.style_prompt, 'strength': req.strength }) }
             async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
                 r = await client.post(url, headers=headers, files=files, data=data)
                 if r.status_code == 200:
@@ -1145,12 +1176,6 @@ async def generate_refine_loop(req: RefineLoopRequest):
         if req.init_imageBase64:
             # Use the provided image as a single 'init' candidate
             results = [{ 'provider': 'init', 'images': [req.init_imageBase64] }]
-            # Temporary debug: confirm we received the init image
-            try:
-                b = _decode_data_url(req.init_imageBase64) if req.init_imageBase64.startswith('data:') else base64.b64decode(req.init_imageBase64)
-                return { 'debug': 'received_init_image', 'image_bytes': len(b) }
-            except Exception as e:
-                return { 'debug': 'received_init_image_but_decode_failed', 'error': str(e) }
         else:
             # Compose a GenerateLogoRequest to reuse existing generation paths
             greq = GenerateLogoRequest(prompt=req.prompt, width=req.width, height=req.height, steps=req.steps, guidance_scale=req.guidance_scale)
@@ -1240,7 +1265,7 @@ async def generate_refine_loop(req: RefineLoopRequest):
                                     'image': ('input.png', cur_bytes, 'image/png'),
                                     'mask': ('mask.png', mask_png, 'image/png')
                                 }
-                                data = { 'parameters': { 'prompt': req.prompt + ' Improve text legibility and make text crisp and high-contrast.', 'strength': 0.8 } }
+                                data = { 'parameters': json.dumps({ 'prompt': req.prompt + ' Improve text legibility and make text crisp and high-contrast.', 'strength': 0.8 }) }
                                 async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
                                     r = await client.post(url, headers=headers, files=files, data=data)
                                     if r.status_code == 200:
