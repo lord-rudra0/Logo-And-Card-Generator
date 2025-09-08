@@ -1,5 +1,6 @@
 import express from 'express'
 import fetch from 'node-fetch'
+import { forwardToPython } from '../services/pythonProxy.js'
 import { generateCardDesign, generateCardImage, generateCardSVG } from '../services/aiService.js'
 
 const router = express.Router()
@@ -117,10 +118,10 @@ router.post('/generate-card-image', async (req, res) => {
 
         // If client requested Stability-only generation with a custom prompt
         if (req.body && req.body.mode === 'stability') {
-          const usePrompt = (req.body.prompt && req.body.prompt.toString().trim().length) ? req.body.prompt : `A high-quality business card layout for ${cardData.name} at ${cardData.company}. Title: ${cardData.title || ''}. Contact: ${cardData.email || ''} ${cardData.phone || ''}. Style: clean, minimal, vector-friendly, centered composition. Include company name or initials as a visible element.`
+          const usePrompt = (req.body.prompt && req.body.prompt.toString().trim().length) ? req.body.prompt : `Photoreal business card mockup and layout for ${cardData.name} (${cardData.title || ''}) at ${cardData.company}. Include company name or initials prominently. Style: clean, modern, print-ready, high-resolution, vector-friendly layout, consistent brand colors, balanced typography, clear hierarchy, readable at small sizes. Deliver front-facing card mockup as a flat, centered composition with neutral studio lighting, subtle paper texture, and a transparent or plain background suitable for catalog/print use. Avoid people, faces, landscapes, busy scenes, stock photo overlays, or unrelated photographic elements.`
           const stabilityPayload = { prompt: usePrompt, width, height, steps: 20, cfg_scale: 7.5, samples: 1 }
-          const stabRes = await fetch(stabilityUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stabilityPayload) })
-          const stabJson = stabRes.ok ? await stabRes.json() : { error: await stabRes.text(), ok: false }
+          // forward via helper which appends a default negative_prompt
+          const stabJson = await forwardToPython('generate/stability', stabilityPayload, { req })
           const images = []
           if (stabJson && Array.isArray(stabJson.images)) stabJson.images.forEach(d => images.push({ source: 'stability', dataUrl: d }))
           else if (stabJson && stabJson.images && typeof stabJson.images === 'string') images.push({ source: 'stability', dataUrl: stabJson.images })
@@ -130,7 +131,7 @@ router.post('/generate-card-image', async (req, res) => {
 
         // Combined mode: craft a Gemini prompt server-side (if available) and request both stability and logo generator
         if (req.body && req.body.mode === 'combined') {
-          let craftedPrompt = `A high-quality business card layout for ${cardData.name} at ${cardData.company}. Title: ${cardData.title || ''}. Contact: ${cardData.email || ''} ${cardData.phone || ''}. Style: clean, minimal, vector-friendly, centered composition. Include company name or initials as a visible element.`
+          let craftedPrompt = `High-quality business card design and photoreal mockup for ${cardData.name} (${cardData.title || ''}) at ${cardData.company}. Include company name or initials as a visible branding element. Style: modern, print-ready, vector-friendly, strong typographic hierarchy, brand color palette, ample negative space. Deliver: 1) flat front-facing card layout suitable for export (svg/png), 2) optional photoreal mockup on neutral background with soft studio lighting and subtle paper texture. Avoid people, faces, logos of other brands, watermarks, or busy photographic backgrounds. Ensure typography is legible and the logo/text scale is appropriate for small print.`
           try {
             if (genAI) {
               const designs = await generateCardDesign(genAI, cardData, industry || 'business', 1)
@@ -150,13 +151,11 @@ router.post('/generate-card-image', async (req, res) => {
           const stabilityPayload = { prompt: craftedPrompt, width, height, steps: 20, cfg_scale: 7.5, samples: 1 }
           const cardPayload = { prompt: craftedPrompt, width, height, steps: 20, guidance_scale: 7.5 }
 
-          const [stabRes, cardRes] = await Promise.all([
-            fetch(stabilityUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stabilityPayload) }),
-            fetch(cardUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cardPayload) })
+          // Use helper to forward both requests and ensure negative_prompt appended
+          const [stabJson, cardJson] = await Promise.all([
+            forwardToPython('generate/stability', stabilityPayload, { req }).catch(e => ({ error: e.message || e.body || e })),
+            forwardToPython('generate/card', cardPayload, { req }).catch(e => ({ error: e.message || e.body || e }))
           ])
-
-          const stabJson = stabRes.ok ? await stabRes.json() : { error: await stabRes.text(), ok: false }
-          const cardJson = cardRes.ok ? await cardRes.json() : { error: await cardRes.text(), ok: false }
 
           const images = []
           const stabilityImages = []

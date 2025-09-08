@@ -1,4 +1,5 @@
 import express from 'express'
+import { forwardToPython } from '../services/pythonProxy.js'
 const router = express.Router()
 
 // POST /api/generateLogo
@@ -31,29 +32,8 @@ router.post('/', async (req, res) => {
     console.log('📦 Step 4: Prepared payload for ML service:')
     console.log(JSON.stringify(payload, null, 2))
     
-    const f = getFetch()
-    const mlUrl = process.env.ML_BASE_URL || 'http://127.0.0.1:8000'
-    console.log(`🚀 Step 5: Sending request to ML service at ${mlUrl}/generate/logo`)
-    
-    const startTime = Date.now()
-    const r = await f(`${mlUrl}/generate/logo`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    
-    const requestTime = Date.now() - startTime
-    console.log(`⏱️  Step 6: ML service responded in ${requestTime}ms with status ${r.status}`)
-    if (!r.ok) {
-      const text = await r.text()
-      console.log('❌ Step 7: ML service error:')
-      console.log('   - Status:', r.status)
-      console.log('   - Response:', text)
-      return res.status(502).json({ error: 'ML service error', status: r.status, details: text })
-    }
-    
-    console.log('✅ Step 7: ML service success, parsing response...')
-    const data = await r.json()
+  console.log('🚀 Step 5: Forwarding to Python ML service (with enforced negative_prompt)')
+  const data = await forwardToPython('generate/logo', payload, { req })
     
     console.log('📊 Step 8: Response data:')
     console.log('   - Number of images:', data.images ? data.images.length : 0)
@@ -63,7 +43,7 @@ router.post('/', async (req, res) => {
       console.log('   - First image preview:', data.images[0].substring(0, 50) + '...')
     }
     
-    console.log('🎉 Step 9: Sending response back to client')
+  console.log('🎉 Step 9: Sending response back to client')
     console.log('=== LOGO GENERATION REQUEST COMPLETED ===\n')
     
     return res.json(data)

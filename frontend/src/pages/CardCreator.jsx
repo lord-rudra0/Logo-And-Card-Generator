@@ -620,7 +620,7 @@ const deleteSelectedImage = () => {
   // Generate image using Stability with an optional user prompt.
   // If no prompt is provided, use a professional fallback prompt that works without cardData.
   const generateWithStability = async () => {
-    const fallback = `A beautiful, professional business card design, clean minimal layout, high-quality, vector-friendly, centered composition, suitable for a professional in any field.`
+    const fallback = `Photoreal, print-ready business card mockup: flat, front-facing card with clean minimal layout, high-quality vector-friendly artwork, clear typographic hierarchy, neutral studio lighting, subtle paper texture, and a plain or transparent background. Avoid people, faces, landscapes, busy scenes, or unrelated photographic objects.`
     const usePrompt = (customPrompt && customPrompt.trim().length >= 3) ? customPrompt.trim() : fallback
     setIsGenerating(true)
     try {
@@ -659,7 +659,7 @@ const deleteSelectedImage = () => {
     setIsGenerating(true)
     setHfPending(true)
     // Build a short prompt from cardData to give Stability something meaningful quickly
-    const shortPrompt = `Professional business card for ${cardData.name} - ${cardData.title || ''} at ${cardData.company}. Clean, modern layout, high quality, well-balanced typography, subtle brand colors, minimal iconography.`
+  const shortPrompt = `Professional business card mockup for ${cardData.name} (${cardData.title || ''}) at ${cardData.company}. Clean modern layout, print-ready, high-resolution, well-balanced typography, subtle brand colors, and minimal iconography. Deliver a flat front-facing card on a plain background suitable for export; avoid people or unrelated photography.`
 
     // Helper to normalize image entries
     const normalizeImgs = (imgs, defaultSource = 'stability') => (imgs || []).map((it) => {
