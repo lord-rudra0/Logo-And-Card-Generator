@@ -1,4 +1,5 @@
 import express from 'express'
+import { forwardToPython } from '../services/pythonProxy.js'
 const router = express.Router()
 
 // POST /api/text-to-image
@@ -50,30 +51,11 @@ router.post('/', async (req, res) => {
     console.log('📦 Step 4: Prepared payload for ML service:')
     console.log(JSON.stringify(payload, null, 2))
     
-    const f = getFetch()
-    const mlUrl = process.env.PY_IMAGE_SERVICE_URL || 'http://localhost:8000'
-    console.log(`🚀 Step 5: Sending request to ML service at ${mlUrl}/generate/text-to-image`)
-    
-    const startTime = Date.now()
-    const r = await f(`${mlUrl}/generate/text-to-image`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    
-    const requestTime = Date.now() - startTime
-    console.log(`⏱️  Step 6: ML service responded in ${requestTime}ms with status ${r.status}`)
-    
-    if (!r.ok) {
-      const text = await r.text()
-      console.log('❌ Step 7: ML service error:')
-      console.log('   - Status:', r.status)
-      console.log('   - Response:', text)
-      return res.status(502).json({ error: 'ML service error', status: r.status, details: text })
-    }
-    
-    console.log('✅ Step 7: ML service success, parsing response...')
-    const data = await r.json()
+  console.log('🚀 Step 5: Forwarding request to Python ML service (text-to-image) with enforced negative_prompt')
+  const startTime = Date.now()
+  const data = await forwardToPython('generate/text-to-image', payload, { req })
+  const requestTime = Date.now() - startTime
+  console.log(`⏱️  Step 6: ML service responded in ${requestTime}ms`)
     
     console.log('📊 Step 8: Response data:')
     console.log('   - Number of images:', data.images ? data.images.length : 0)

@@ -1,6 +1,7 @@
 import express from 'express'
 import fetch from 'node-fetch'
 import { recommendStyle, checkAccessibility, ocrFromImageBase64 } from '../services/mlService.js'
+import { forwardToPython } from '../services/pythonProxy.js'
 import { saveBase64Image, getCacheUrl } from '../services/imageCache.js'
 import { createJob, getJob } from '../services/jobQueue.js'
 
@@ -22,19 +23,9 @@ router.use((req, res, next) => {
 })
 
 const proxyToPython = async (path, payload, options = {}) => {
-  if (!PY_ML_URL) throw new Error('Python ML service not configured')
-  const url = `${PY_ML_URL.replace(/\/$/, '')}/${path.replace(/^\//, '')}`
-  const headers = { 'Content-Type': 'application/json' }
-  const requestId = options.requestId || (options.req && options.req.requestId) || null
-  if (requestId) headers['X-Request-Id'] = requestId
-  // include requestId in body metadata when possible for easier tracing
-  const body = Object.assign({}, payload, { _meta: Object.assign({}, payload._meta || {}, { requestId }) })
-  const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
-  if (!r.ok) {
-    const text = await r.text()
-    throw new Error(`Python ML service error ${r.status}: ${text}`)
-  }
-  return r.json()
+  // Delegate to centralized forwardToPython which appends default negative prompts
+  // and preserves request-id tracing. Keep the same signature for backward-compat.
+  return forwardToPython(path, payload, options)
 }
 
 // POST /api/ml/recommend-style
@@ -106,11 +97,9 @@ router.post('/generate-logo', async (req, res) => {
     const wantAsync = req.query && String(req.query.async) === 'true'
     if (wantAsync) {
       const job = createJob(async (updateProgress) => {
-        // runner: proxy to python (if configured) then save images
-        if (!PY_ML_URL) throw new Error('Python ML service not configured')
         // preliminary progress
         updateProgress(5)
-  const data = await proxyToPython('generate/logo', payload, { req })
+  const data = await forwardToPython('generate/logo', payload, { req })
         updateProgress(60)
         const imgs = data.images || data.generated_images || []
         const saved = imgs.map((d) => {
@@ -128,7 +117,7 @@ router.post('/generate-logo', async (req, res) => {
     }
     if (PY_ML_URL) {
       try {
-  const data = await proxyToPython('generate/logo', payload, { req })
+  const data = await forwardToPython('generate/logo', payload, { req })
         // if data contains data.images or images as data URLs, save them to cache and return URLs
         const imgs = data.images || data.generated_images || []
         const saved = imgs.map((d) => {

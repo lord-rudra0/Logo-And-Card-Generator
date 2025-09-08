@@ -110,11 +110,8 @@ router.post('/generate-card-image', async (req, res) => {
     const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
     if (PY_ML_URL) {
       try {
-        const width = (size && size.width) || 1050
-        const height = (size && size.height) || 600
-
-        const stabilityUrl = `${PY_ML_URL.replace(/\/$/, '')}/generate/stability`
-  const cardUrl = `${PY_ML_URL.replace(/\/$/, '')}/generate/card`
+  const width = (size && size.width) || 1050
+  const height = (size && size.height) || 600
 
         // If client requested Stability-only generation with a custom prompt
         if (req.body && req.body.mode === 'stability') {
@@ -174,8 +171,8 @@ router.post('/generate-card-image', async (req, res) => {
           // If at least one image succeeded, return 200 with available images and diagnostic details.
           if (images.length > 0) {
             // Log if HF failed so we can debug later
-            if ((cardJson && cardJson.error) || !cardRes.ok) {
-              console.warn('HF/card generation failed or returned non-OK status', { status: cardRes.status, body: cardJson })
+            if ((cardJson && cardJson.error)) {
+              console.warn('HF/card generation returned an error', { body: cardJson })
             }
             return res.json({ success: true, images, details: { stability: stabJson, card: cardJson } })
           }

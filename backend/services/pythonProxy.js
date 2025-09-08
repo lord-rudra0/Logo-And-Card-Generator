@@ -2,7 +2,8 @@ import fetch from 'node-fetch'
 
 const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
 
-const DEFAULT_NEGATIVE_PROMPT = 'no people, no faces, no hands, no logos of other brands, no watermarks, no signatures, no text overlays, no busy backgrounds, avoid photorealistic scenes when a vector-style/logo/graphic is required.'
+const LOGO_NEGATIVE_PROMPT = 'no people, no faces, no hands, no photographic scenes, no stock photos, no watermarks, no signatures, no unrelated text overlays, avoid realistic backgrounds; produce clean vector-like artwork suitable for logos.'
+const CARD_NEGATIVE_PROMPT = 'no people, no faces, no busy scenes, no unrelated props, no watermarks, no logos of other brands, avoid overly complex photographic backgrounds; produce a clean, flat, print-ready card mockup or vector-friendly layout.'
 
 if (!PY_ML_URL) {
   console.warn('Python ML service not configured (pythonProxy will throw if used)')
@@ -19,19 +20,28 @@ export async function forwardToPython(path, payload = {}, options = {}) {
 
   const body = { ...payload }
   try {
+    // Determine which default negative prompt to use. Allow caller to override via options.defaultNegativePrompt
+    let defaultNeg = options && options.defaultNegativePrompt
+    if (!defaultNeg) {
+      const p = (path || '').toString().toLowerCase()
+      if (p.includes('logo')) defaultNeg = LOGO_NEGATIVE_PROMPT
+      else if (p.includes('stability') || p.includes('card')) defaultNeg = CARD_NEGATIVE_PROMPT
+      else defaultNeg = CARD_NEGATIVE_PROMPT
+    }
+
     if (body.negative_prompt && typeof body.negative_prompt === 'string' && body.negative_prompt.trim().length > 0) {
       // Append defaults, but avoid duplicates
       const existing = body.negative_prompt.trim()
-      if (!existing.includes(DEFAULT_NEGATIVE_PROMPT)) body.negative_prompt = `${existing}, ${DEFAULT_NEGATIVE_PROMPT}`
+      if (!existing.includes(defaultNeg)) body.negative_prompt = `${existing}, ${defaultNeg}`
     } else if (body.negative_prompt && Array.isArray(body.negative_prompt)) {
       // convert array to comma-separated string and append defaults
       const existing = body.negative_prompt.join(', ')
-      body.negative_prompt = `${existing}, ${DEFAULT_NEGATIVE_PROMPT}`
+      body.negative_prompt = `${existing}, ${defaultNeg}`
     } else {
-      body.negative_prompt = DEFAULT_NEGATIVE_PROMPT
+      body.negative_prompt = defaultNeg
     }
   } catch (e) {
-    body.negative_prompt = DEFAULT_NEGATIVE_PROMPT
+    body.negative_prompt = CARD_NEGATIVE_PROMPT
   }
 
   const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
