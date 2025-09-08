@@ -7,6 +7,12 @@ import base64
 import httpx
 import httpcore
 import asyncio
+from io import BytesIO
+try:
+    from PIL import Image, ImageFilter, ImageOps
+    PIL_AVAILABLE = True
+except Exception:
+    PIL_AVAILABLE = False
 
 # Stability.ai fallback configuration (set STABILITY_API_KEY in environment; do NOT hardcode keys)
 STABILITY_API_KEY = os.environ.get('STABILITY_API_KEY')
@@ -122,6 +128,62 @@ def _generate_local_image_sync(prompt, steps=40, high_noise_frac=0.8, width=512,
     out.save(buf, format='PNG')
     buf.seek(0)
     return buf.read()
+
+
+def _postprocess_image_bytes(img_bytes: bytes) -> bytes:
+    """Optional lightweight post-processing to improve legibility of small card text.
+    Controlled by env var POSTPROCESS_ENABLED (default: true).
+    Parameters configurable via POSTPROCESS_UPSCALE (float, default 1.5)
+    and POSTPROCESS_UNSHARP_RADIUS/AMOUNT/THRESHOLD.
+    Returns PNG bytes.
+    """
+    enabled = os.environ.get('POSTPROCESS_ENABLED', '1')
+    if str(enabled).lower() in ('0', 'false', 'no'):
+        return img_bytes
+    if not PIL_AVAILABLE:
+        print('Pillow not available; skipping post-processing')
+        return img_bytes
+
+    try:
+        buf = BytesIO(img_bytes)
+        img = Image.open(buf).convert('RGBA')
+
+        # upscale preserving aspect ratio
+        try:
+            upscale = float(os.environ.get('POSTPROCESS_UPSCALE', 1.5))
+        except Exception:
+            upscale = 1.5
+        if upscale and upscale > 1.01:
+            new_w = int(img.width * upscale)
+            new_h = int(img.height * upscale)
+            img = img.resize((new_w, new_h), resample=Image.LANCZOS)
+
+        # apply unsharp mask to emphasize text edges
+        try:
+            us_radius = float(os.environ.get('POSTPROCESS_UNSHARP_RADIUS', 1.0))
+            us_percent = float(os.environ.get('POSTPROCESS_UNSHARP_PERCENT', 150.0))
+            us_threshold = int(os.environ.get('POSTPROCESS_UNSHARP_THRESHOLD', 3))
+            # PIL ImageFilter.UnsharpMask takes radius, percent, threshold
+            img = img.filter(ImageFilter.UnsharpMask(radius=us_radius, percent=int(us_percent), threshold=us_threshold))
+        except Exception as e:
+            print('Unsharp failed:', e)
+
+        # optional autocontrast to improve contrast on low-contrast renders
+        try:
+            do_autocontrast = os.environ.get('POSTPROCESS_AUTOCONTRAST', '1')
+            if str(do_autocontrast).lower() not in ('0', 'false', 'no'):
+                img = ImageOps.autocontrast(img)
+        except Exception:
+            pass
+
+        out_buf = BytesIO()
+        # save as PNG to preserve sharpness; convert back to RGBA/PNG
+        img.save(out_buf, format='PNG')
+        out_buf.seek(0)
+        return out_buf.read()
+    except Exception as e:
+        print('Post-processing failed:', e)
+        return img_bytes
 
 app = FastAPI(title='CardGEN ML PoC Service')
 
@@ -401,6 +463,11 @@ async def generate_logo(req: GenerateLogoRequest):
                     return data
 
                 img_bytes = r.content
+                # optional post-process
+                try:
+                    img_bytes = _postprocess_image_bytes(img_bytes)
+                except Exception:
+                    pass
                 b64 = base64.b64encode(img_bytes).decode('utf-8')
                 data_url = f'data:image/png;base64,{b64}'
                 print('Returning image from Hugging Face')
