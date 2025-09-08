@@ -46,3 +46,4 @@ temp/
 *.sw?
 
 .venv/
+venv/
