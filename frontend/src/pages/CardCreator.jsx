@@ -17,6 +17,9 @@ const FONT_OPTIONS = [
 
 // ---- Global helpers (usable by both MiniCardPreview and CardCreator) ----
 // Basic hex validator
+// Inner padding (px) to keep content away from card edges and bleed
+const INNER_PADDING = 12
+
 function isHex(val) {
   return typeof val === 'string' && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(val.trim())
 }
@@ -67,44 +70,6 @@ function ensureReadableTextColor({ bg, primary, secondary, proposed }) {
     // pick between black/white
     return contrastRatio(black, bg) >= contrastRatio(white, bg) ? black : white
   }
-
-  // Simple vertical collision resolver for text blocks
-  // Ensures blocks (company, name, title, contacts) don't overlap by nudging downward
-  const resolveOverlaps = (pos, sizes) => {
-    const keys = ['company', 'name', 'title', 'contacts']
-    const estHeight = (k) => {
-      if (k === 'name') return Math.round((sizes.name || 20) * 1.25)
-      if (k === 'title') return Math.round((sizes.title || 16) * 1.2)
-      if (k === 'company') return Math.round((sizes.company || 14) * 1.15)
-      if (k === 'contacts') return 56 // multi-line small text block
-      return 18
-    }
-    const spacing = 6
-    const items = keys
-      .filter((k) => pos[k])
-      .map((k) => ({ key: k, x: pos[k].x, y: pos[k].y, h: estHeight(k) }))
-      .sort((a, b) => a.y - b.y)
-
-    for (let i = 1; i < items.length; i++) {
-      const prev = items[i - 1]
-      const cur = items[i]
-      const overlap = prev.y + prev.h + spacing - cur.y
-      if (overlap > 0) {
-        cur.y += overlap
-      }
-    }
-
-    // Clamp within card bounds
-    const maxY = cardHeight - 10
-    items.forEach((it) => { it.y = Math.min(it.y, maxY) })
-
-    const adjusted = { ...pos }
-    items.forEach((it) => {
-      adjusted[it.key] = { x: it.x, y: it.y }
-    })
-    return adjusted
-  }
-
   // No solid bg: consider gradient or primary/secondary pair
   const a = isHex(primary) ? primary : '#3b82f6'
   const b = isHex(secondary) ? secondary : '#1e40af'
@@ -753,7 +718,18 @@ const deleteSelectedImage = () => {
     try {
       const qrData = cardData.website || `mailto:${cardData.email}`
       const qrCodeUrl = await QRCode.toDataURL(qrData)
-      setDesign(prev => ({ ...prev, qrCode: qrCodeUrl }))
+      // Remove any existing QR images and add this new one as a draggable asset
+      const id = `qr_${Date.now()}`
+      const size = 56
+      const x = Math.max(INNER_PADDING + 8, cardWidth - INNER_PADDING - size)
+      const y = Math.max(INNER_PADDING + 8, cardHeight - INNER_PADDING - size)
+  const newQr = { id, src: qrCodeUrl, x, y, width: size, height: size, rotation: 0, shape: 'square', brightness: 1, contrast: 1, saturation: 1, hue: 0, opacity: 1 }
+      setImages(prev => {
+        // remove old qr_* images and append new
+        const filtered = (prev || []).filter(it => !(it && it.id && it.id.startsWith && it.id.startsWith('qr_')))
+        return [...filtered, newQr]
+      })
+      setSelectedImageId(id)
     } catch (error) {
       console.error('Error generating QR code:', error)
     }
@@ -843,19 +819,56 @@ const deleteSelectedImage = () => {
   const positionToCoords = (label) => {
     const l = (label || '').toString().toLowerCase()
     const w = cardWidth, h = cardHeight
-    const padding = 20
-    const centers = { x: w / 2 - 100, y: h / 2 - 10 }
-    if (l.includes('top') && l.includes('left')) return { x: padding, y: padding + 10 }
-    if (l.includes('top') && l.includes('center')) return { x: centers.x, y: padding + 10 }
-    if (l.includes('top') && l.includes('right')) return { x: w - 200 - padding, y: padding + 10 }
+  const padding = INNER_PADDING + 6
+  const centers = { x: w / 2 - 100, y: h / 2 - 10 }
+  if (l.includes('top') && l.includes('left')) return { x: padding, y: padding + 6 }
+  if (l.includes('top') && l.includes('center')) return { x: centers.x, y: padding + 6 }
+  if (l.includes('top') && l.includes('right')) return { x: w - 200 - padding, y: padding + 6 }
     if ((l.includes('center') || l.includes('middle')) && l.includes('left')) return { x: padding, y: centers.y }
     if (l.includes('center') || l.includes('middle')) return { x: centers.x, y: centers.y }
     if ((l.includes('center') || l.includes('middle')) && l.includes('right')) return { x: w - 200 - padding, y: centers.y }
-    if (l.includes('bottom') && l.includes('left')) return { x: padding, y: h - 80 }
-    if (l.includes('bottom') && l.includes('center')) return { x: centers.x, y: h - 80 }
-    if (l.includes('bottom') && l.includes('right')) return { x: w - 200 - padding, y: h - 80 }
+  if (l.includes('bottom') && l.includes('left')) return { x: padding, y: h - 80 - padding }
+  if (l.includes('bottom') && l.includes('center')) return { x: centers.x, y: h - 80 - padding }
+  if (l.includes('bottom') && l.includes('right')) return { x: w - 200 - padding, y: h - 80 - padding }
     // defaults
     return { x: padding, y: padding + 10 }
+  }
+
+  // Simple vertical collision resolver for text blocks
+  // Ensures blocks (company, name, title, contacts) don't overlap by nudging downward
+  const resolveOverlaps = (pos, sizes, cardH) => {
+    const keys = ['company', 'name', 'title', 'contacts']
+    const estHeight = (k) => {
+      if (k === 'name') return Math.round((sizes.name || 20) * 1.25)
+      if (k === 'title') return Math.round((sizes.title || 16) * 1.2)
+      if (k === 'company') return Math.round((sizes.company || 14) * 1.15)
+      if (k === 'contacts') return 56 // multi-line small text block
+      return 18
+    }
+    const spacing = 6
+    const items = keys
+      .filter((k) => pos[k])
+      .map((k) => ({ key: k, x: pos[k].x, y: pos[k].y, h: estHeight(k) }))
+      .sort((a, b) => a.y - b.y)
+
+    for (let i = 1; i < items.length; i++) {
+      const prev = items[i - 1]
+      const cur = items[i]
+      const overlap = prev.y + prev.h + spacing - cur.y
+      if (overlap > 0) {
+        cur.y += overlap
+      }
+    }
+
+    // Clamp within card bounds
+    const maxY = (typeof cardH === 'number') ? (cardH - 10) : (cardHeight - 10)
+    items.forEach((it) => { it.y = Math.min(it.y, maxY) })
+
+    const adjusted = { ...pos }
+    items.forEach((it) => {
+      adjusted[it.key] = { x: it.x, y: it.y }
+    })
+    return adjusted
   }
 
   // Apply AI suggestion to current design (template, colors, font, sizes, positions)
@@ -924,18 +937,18 @@ const deleteSelectedImage = () => {
 
       let newPositions = { ...positions }
       const safeMargin = (normalized.safeMargin) ? normalized.safeMargin : { top: 12, right: 12, bottom: 12, left: 12 }
-      const minX = safeMargin.left || 12
-      const minY = safeMargin.top || 12
-      const maxX = (cardWidth - (safeMargin.right || 12))
-      const maxY = (cardHeight - (safeMargin.bottom || 12))
+  const minX = Math.max(INNER_PADDING, safeMargin.left || INNER_PADDING)
+  const minY = Math.max(INNER_PADDING, safeMargin.top || INNER_PADDING)
+  const maxX = (cardWidth - Math.max(INNER_PADDING, safeMargin.right || INNER_PADDING))
+  const maxY = (cardHeight - Math.max(INNER_PADDING, safeMargin.bottom || INNER_PADDING))
 
       if (nameMeta.position) newPositions.name = positionToCoords(nameMeta.position)
       if (titleMeta.position) newPositions.title = positionToCoords(titleMeta.position)
       if (companyMeta.position) newPositions.company = positionToCoords(companyMeta.position)
       if (contactsMeta.position) newPositions.contacts = positionToCoords(contactsMeta.position)
 
-      // De-overlap text blocks
-      newPositions = resolveOverlaps(newPositions, { name: namePx, title: titlePx, company: companyPx })
+  // De-overlap text blocks
+  newPositions = resolveOverlaps(newPositions, { name: namePx, title: titlePx, company: companyPx }, cardHeight)
 
       // Clamp positions to safe margin and card bounds, and snap to grid if enabled
       Object.keys(newPositions).forEach((k) => {
@@ -1132,10 +1145,12 @@ const deleteSelectedImage = () => {
     // Clamp within card bounds
     const card = cardRef.current
     if (card) {
-      const rect = card.getBoundingClientRect()
-      // We don't know the exact element size here; add a small margin
-      const maxX = rect.width - 20
-      const maxY = rect.height - 20
+  const rect = card.getBoundingClientRect()
+  // Use INNER_PADDING for safe bounds
+  const maxX = rect.width - INNER_PADDING - 20
+  const maxY = rect.height - INNER_PADDING - 20
+  const minX = INNER_PADDING
+  const minY = INNER_PADDING
       if (snapToGrid) {
         nextX = snap(nextX)
         nextY = snap(nextY)
@@ -1143,8 +1158,8 @@ const deleteSelectedImage = () => {
       setPositions(prev => ({
         ...prev,
         [key]: {
-          x: clamp(nextX, 0, maxX),
-          y: clamp(nextY, 0, maxY)
+          x: clamp(nextX, minX, maxX),
+          y: clamp(nextY, minY, maxY)
         }
       }))
     } else {
@@ -1214,7 +1229,7 @@ const deleteSelectedImage = () => {
   }, [])
 
   const resetPositions = () => {
-    const defaults = { name: { x: 20, y: 30 }, title: { x: 20, y: 70 }, company: { x: 20, y: 100 }, contacts: { x: 20, y: 140 } }
+  const defaults = { name: { x: INNER_PADDING + 8, y: INNER_PADDING + 10 }, title: { x: INNER_PADDING + 8, y: INNER_PADDING + 50 }, company: { x: INNER_PADDING + 8, y: INNER_PADDING + 90 }, contacts: { x: INNER_PADDING + 8, y: cardHeight - INNER_PADDING - 80 } }
     setPositions(defaults)
   }
 
@@ -1243,6 +1258,24 @@ const deleteSelectedImage = () => {
         ) : (
           <>
         <h3>Design Tools</h3>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, marginBottom: 6 }}>
+          <button className="btn btn-primary" onClick={generateQRCode} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            📱 Add QR Code
+          </button>
+          <button className="btn btn-outline" onClick={() => {
+            // remove qr images
+            setImages(prev => (prev || []).filter(it => !(it && it.id && it.id.startsWith && it.id.startsWith('qr_'))))
+            setSelectedImageId(null)
+          }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            ✖ Remove QR
+          </button>
+          <button className="btn btn-secondary" onClick={() => {
+            if (window.confirm('Reset positions to defaults? This cannot be undone.')) resetPositions()
+          }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            ↩️ Reset Positions
+          </button>
+        </div>
 
         <h4 style={{ marginTop: 'var(--spacing-2)' }}>Assets</h4>
         <div className="form-group" style={{ marginBottom: 'var(--spacing-4)' }}>
@@ -1486,6 +1519,9 @@ const deleteSelectedImage = () => {
           <input id="keep-layout" type="checkbox" checked={useHouseLayout} onChange={(e) => setUseHouseLayout(e.target.checked)} />
           <label htmlFor="keep-layout" className="form-label" style={{ margin: 0 }}>Keep house layout when applying AI</label>
         </div>
+        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
+          Tip: When "Keep house layout" is enabled, applying templates or AI suggestions will only change colors and fonts but will not move text positions. Click a template while "Keep house layout" is off to apply its unique layout and safe margins.
+        </div>
 
         {/* House templates (moved below Font Family) */}
         <h4 style={{ marginTop: 'var(--spacing-6)' }}>House Templates</h4>
@@ -1569,15 +1605,6 @@ const deleteSelectedImage = () => {
           </div>
         )}
 
-        <div style={{ marginTop: 'var(--spacing-6)' }}>
-          <button 
-            onClick={generateQRCode} 
-            className="btn btn-secondary" 
-            style={{ width: '100%' }}
-          >
-            📱 Add QR Code
-          </button>
-        </div>
 
         {/* Positioning behavior controls */}
         <h4 style={{ marginTop: 'var(--spacing-6)' }}>Positioning</h4>
@@ -1608,9 +1635,7 @@ const deleteSelectedImage = () => {
             onChange={(e) => setGridSize(Math.max(1, parseInt(e.target.value || '8', 10)))}
           />
         </div>
-        <div>
-          <button className="btn btn-secondary" style={{ width: '100%' }} onClick={resetPositions}>↩️ Reset Positions</button>
-        </div>
+  {/* QR Code and Reset buttons moved to top of the panel for easier access */}
 
         {/* Icon Picker modal */}
         <IconPicker open={iconPickerOpen} onClose={() => setIconPickerOpen(false)} onSelect={addIcon} />
@@ -1885,53 +1910,53 @@ const deleteSelectedImage = () => {
                     </div>
                   </div>
 
-                  <label className="form-label">Brightness ({img.brightness.toFixed(2)})</label>
+                  <label className="form-label">Brightness ({(img.brightness ?? 1).toFixed(2)})</label>
                   <input
                     type="range"
                     min="0"
                     max="2"
                     step="0.01"
-                    value={img.brightness}
+                    value={img.brightness ?? 1}
                     onChange={(e) => updateSelectedImage({ brightness: parseFloat(e.target.value) })}
                   />
 
-                  <label className="form-label">Contrast ({img.contrast.toFixed(2)})</label>
+                  <label className="form-label">Contrast ({(img.contrast ?? 1).toFixed(2)})</label>
                   <input
                     type="range"
                     min="0"
                     max="2"
                     step="0.01"
-                    value={img.contrast}
+                    value={img.contrast ?? 1}
                     onChange={(e) => updateSelectedImage({ contrast: parseFloat(e.target.value) })}
                   />
 
-                  <label className="form-label">Saturation ({img.saturation.toFixed(2)})</label>
+                  <label className="form-label">Saturation ({(img.saturation ?? 1).toFixed(2)})</label>
                   <input
                     type="range"
                     min="0"
                     max="3"
                     step="0.01"
-                    value={img.saturation}
+                    value={img.saturation ?? 1}
                     onChange={(e) => updateSelectedImage({ saturation: parseFloat(e.target.value) })}
                   />
 
-                  <label className="form-label">Hue ({img.hue}°)</label>
+                  <label className="form-label">Hue ({(img.hue ?? 0)}°)</label>
                   <input
                     type="range"
                     min="-180"
                     max="180"
                     step="1"
-                    value={img.hue}
+                    value={img.hue ?? 0}
                     onChange={(e) => updateSelectedImage({ hue: parseInt(e.target.value || '0', 10) })}
                   />
 
-                  <label className="form-label">Opacity ({img.opacity.toFixed(2)})</label>
+                  <label className="form-label">Opacity ({(img.opacity ?? 1).toFixed(2)})</label>
                   <input
                     type="range"
                     min="0"
                     max="1"
                     step="0.01"
-                    value={img.opacity}
+                    value={img.opacity ?? 1}
                     onChange={(e) => updateSelectedImage({ opacity: parseFloat(e.target.value) })}
                   />
 
@@ -1949,7 +1974,7 @@ const deleteSelectedImage = () => {
           <h3>Template Library</h3>
           <div className="ai-suggestions" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
             {currentTemplates.map((tpl) => (
-              <div key={tpl.id} className="suggestion-card" onClick={() => applyAiSuggestion(tpl, { forcePositions: true })} style={{ cursor: 'pointer', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--panel-muted)' }}>
+              <div key={tpl.id} className="suggestion-card" onClick={() => { setUseHouseLayout(false); applyAiSuggestion(tpl, { forcePositions: true }) }} style={{ cursor: 'pointer', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--panel-muted)' }}>
                 <div style={{ padding: 8, fontSize: 12, fontWeight: 600 }}>{tpl.name}</div>
                 <div style={{ padding: 8 }}>
                   <MiniCardPreview suggestion={tpl} />
