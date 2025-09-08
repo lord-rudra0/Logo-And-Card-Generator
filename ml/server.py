@@ -23,6 +23,17 @@ except Exception:
         ocr_text_from_bytes = None
         _decode_data_url = None
 
+# Attempt to import inpaint helpers regardless of whether sr imported successfully.
+try:
+    from .inpaint import detect_text_bboxes, make_mask_from_boxes, expand_boxes_by_ratio
+except Exception:
+    try:
+        from inpaint import detect_text_bboxes, make_mask_from_boxes, expand_boxes_by_ratio
+    except Exception:
+        detect_text_bboxes = None
+        make_mask_from_boxes = None
+        expand_boxes_by_ratio = None
+
 # Stability.ai fallback configuration (set STABILITY_API_KEY in environment; do NOT hardcode keys)
 STABILITY_API_KEY = os.environ.get('STABILITY_API_KEY')
 # Prefer an explicit STABILITY_MODEL; if absent, allow using HUGGINGFACE_MODEL
@@ -886,223 +897,393 @@ async def generate_stability(req: StabilityRequest):
         raise HTTPException(status_code=502, detail=f'Stability generation failed: {err_text}')
 
 
-    class LayoutRequest(BaseModel):
-        width: Optional[int] = 1050
-        height: Optional[int] = 600
-        name: Optional[str]
-        title: Optional[str]
-        company: Optional[str]
-        logo_preference: Optional[str] = 'left'  # left|center|right
+class LayoutRequest(BaseModel):
+    width: Optional[int] = 1050
+    height: Optional[int] = 600
+    name: Optional[str]
+    title: Optional[str]
+    company: Optional[str]
+    logo_preference: Optional[str] = 'left'  # left|center|right
 
 
-    @app.post('/layout/suggest')
-    async def layout_suggest(req: LayoutRequest):
-        # Simple rule-based layout suggestions: return bounding boxes as percentages
-        w = int(req.width or 1050)
-        h = int(req.height or 600)
-        # Normalize to 0..1 box coords
-        boxes = {}
-        # logo box
-        if req.logo_preference == 'left':
-            boxes['logo'] = { 'x': 0.05, 'y': 0.2, 'w': 0.25, 'h': 0.6 }
-            text_x = 0.33
-        elif req.logo_preference == 'right':
-            boxes['logo'] = { 'x': 0.70, 'y': 0.2, 'w': 0.25, 'h': 0.6 }
-            text_x = 0.05
-        else:
-            boxes['logo'] = { 'x': 0.35, 'y': 0.05, 'w': 0.30, 'h': 0.30 }
-            text_x = 0.05
+@app.post('/layout/suggest')
+async def layout_suggest(req: LayoutRequest):
+    # Simple rule-based layout suggestions: return bounding boxes as percentages
+    w = int(req.width or 1050)
+    h = int(req.height or 600)
+    # Normalize to 0..1 box coords
+    boxes = {}
+    # logo box
+    if req.logo_preference == 'left':
+        boxes['logo'] = { 'x': 0.05, 'y': 0.2, 'w': 0.25, 'h': 0.6 }
+        text_x = 0.33
+    elif req.logo_preference == 'right':
+        boxes['logo'] = { 'x': 0.70, 'y': 0.2, 'w': 0.25, 'h': 0.6 }
+        text_x = 0.05
+    else:
+        boxes['logo'] = { 'x': 0.35, 'y': 0.05, 'w': 0.30, 'h': 0.30 }
+        text_x = 0.05
 
-        # name (prominent)
-        boxes['name'] = { 'x': text_x, 'y': 0.08, 'w': 0.60, 'h': 0.18 }
-        # title/company
-        boxes['title'] = { 'x': text_x, 'y': 0.28, 'w': 0.60, 'h': 0.12 }
-        boxes['company'] = { 'x': text_x, 'y': 0.42, 'w': 0.60, 'h': 0.10 }
-        # contact block bottom-left
-        boxes['contact'] = { 'x': 0.05, 'y': 0.65, 'w': 0.60, 'h': 0.25 }
+    # name (prominent)
+    boxes['name'] = { 'x': text_x, 'y': 0.08, 'w': 0.60, 'h': 0.18 }
+    # title/company
+    boxes['title'] = { 'x': text_x, 'y': 0.28, 'w': 0.60, 'h': 0.12 }
+    boxes['company'] = { 'x': text_x, 'y': 0.42, 'w': 0.60, 'h': 0.10 }
+    # contact block bottom-left
+    boxes['contact'] = { 'x': 0.05, 'y': 0.65, 'w': 0.60, 'h': 0.25 }
 
-        return { 'width': w, 'height': h, 'boxes': boxes }
-
-
-    class VectorizeRequest(BaseModel):
-        imageBase64: str
+    return { 'width': w, 'height': h, 'boxes': boxes }
 
 
-    @app.post('/vectorize')
-    async def vectorize(req: VectorizeRequest):
-        # Try to call potrace via python bindings or cv2 + skimage fallback.
-        try:
-            data = _decode_data_url(req.imageBase64) if req.imageBase64.startswith('data:') else base64.b64decode(req.imageBase64)
-        except Exception:
-            raise HTTPException(status_code=400, detail='invalid imageBase64')
-
-        # Try potrace (optional)
-        try:
-            import cv2
-            import numpy as np
-            # simple trace using OpenCV thresholds and contours -> convert to SVG path
-            nparr = np.frombuffer(data, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-            if img is None:
-                raise Exception('cv2 failed to decode image')
-            _, th = cv2.threshold(img, 250, 255, cv2.THRESH_BINARY_INV)
-            contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            # build a naive SVG
-            h, w = img.shape[:2]
-            paths = []
-            for cnt in contours:
-                pts = cnt.reshape(-1, 2)
-                d = 'M ' + ' L '.join([f"{int(x)},{int(y)}" for x, y in pts]) + ' Z'
-                paths.append(d)
-            svg = f"<svg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}'>" + ''.join([f"<path d='{p}' fill='black'/>" for p in paths]) + '</svg>'
-            return { 'svg': svg }
-        except Exception as e:
-            # Fallback: return informative message with recommended tools
-            return { 'error': 'vectorize_unavailable', 'details': str(e), 'note': 'Install opencv-python or potrace for vectorization; or export PNG and run external tracing.' }
+class VectorizeRequest(BaseModel):
+    imageBase64: str
 
 
-    class IconSearchRequest(BaseModel):
-        q: str
-        top_k: Optional[int] = 6
+@app.post('/vectorize')
+async def vectorize(req: VectorizeRequest):
+    # Try to call potrace via python bindings or cv2 + skimage fallback.
+    try:
+        data = _decode_data_url(req.imageBase64) if req.imageBase64.startswith('data:') else base64.b64decode(req.imageBase64)
+    except Exception:
+        raise HTTPException(status_code=400, detail='invalid imageBase64')
+
+    # Try potrace (optional)
+    try:
+        import cv2
+        import numpy as np
+        # simple trace using OpenCV thresholds and contours -> convert to SVG path
+        nparr = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise Exception('cv2 failed to decode image')
+        _, th = cv2.threshold(img, 250, 255, cv2.THRESH_BINARY_INV)
+        contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # build a naive SVG
+        h, w = img.shape[:2]
+        paths = []
+        for cnt in contours:
+            pts = cnt.reshape(-1, 2)
+            d = 'M ' + ' L '.join([f"{int(x)},{int(y)}" for x, y in pts]) + ' Z'
+            paths.append(d)
+        svg = f"<svg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}'>" + ''.join([f"<path d='{p}' fill='black'/>" for p in paths]) + '</svg>'
+        return { 'svg': svg }
+    except Exception as e:
+        # Fallback: return informative message with recommended tools
+        return { 'error': 'vectorize_unavailable', 'details': str(e), 'note': 'Install opencv-python or potrace for vectorization; or export PNG and run external tracing.' }
 
 
-    def _load_frontend_icons():
-        # Best-effort parser for frontend/src/data/icons.js to extract id and label
-        try:
-            path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'src', 'data', 'icons.js')
-            path = os.path.abspath(path)
-            if not os.path.exists(path):
-                return []
-            out = []
-            with open(path, 'r', encoding='utf-8') as fh:
-                txt = fh.read()
-            # crude parsing: find "id: '...'" and "label: '...'" occurrences within ICONS array
-            import re
-            entries = re.findall(r"\{([^}]+)\}", txt, flags=re.DOTALL)
-            for e in entries:
-                m_id = re.search(r"id\s*:\s*['\"]([\w-]+)['\"]", e)
-                m_label = re.search(r"label\s*:\s*['\"]([^'\"]+)['\"]", e)
-                if m_id and m_label:
-                    out.append({ 'id': m_id.group(1), 'label': m_label.group(1) })
-            return out
-        except Exception:
+class IconSearchRequest(BaseModel):
+    q: str
+    top_k: Optional[int] = 6
+
+
+def _load_frontend_icons():
+    # Best-effort parser for frontend/src/data/icons.js to extract id and label
+    try:
+        path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'src', 'data', 'icons.js')
+        path = os.path.abspath(path)
+        if not os.path.exists(path):
             return []
+        out = []
+        with open(path, 'r', encoding='utf-8') as fh:
+            txt = fh.read()
+        # crude parsing: find "id: '...'" and "label: '...'" occurrences within ICONS array
+        import re
+        entries = re.findall(r"\{([^}]+)\}", txt, flags=re.DOTALL)
+        for e in entries:
+            m_id = re.search(r"id\s*:\s*['\"]([\w-]+)['\"]", e)
+            m_label = re.search(r"label\s*:\s*['\"]([^'\"]+)['\"]", e)
+            if m_id and m_label:
+                out.append({ 'id': m_id.group(1), 'label': m_label.group(1) })
+        return out
+    except Exception:
+        return []
 
 
-    @app.post('/icons/search')
-    async def icons_search(req: IconSearchRequest):
-        q = (req.q or '').strip().lower()
-        if not q:
-            return { 'results': [] }
+@app.post('/icons/search')
+async def icons_search(req: IconSearchRequest):
+    q = (req.q or '').strip().lower()
+    if not q:
+        return { 'results': [] }
 
-        icons = _load_frontend_icons()
-        if not icons:
-            return { 'results': [], 'warning': 'no frontend icons found' }
+    icons = _load_frontend_icons()
+    if not icons:
+        return { 'results': [], 'warning': 'no frontend icons found' }
 
-        # If HF embeddings available, use them to rank; otherwise fallback to substring/fuzzy score
-        hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
+    # If HF embeddings available, use them to rank; otherwise fallback to substring/fuzzy score
+    hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
+    try:
+        if hf_token:
+            # call embeddings endpoint for query and icon labels
+            model = os.environ.get('HF_EMBEDDING_MODEL') or 'sentence-transformers/all-MiniLM-L6-v2'
+            url = f'https://api-inference.huggingface.co/models/{model}'
+            headers = {'Authorization': f'Bearer {hf_token}'}
+            # prepare inputs: list of texts (first is query)
+            texts = [q] + [i['label'] for i in icons]
+            payload = { 'inputs': texts }
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                r = await client.post(url, headers=headers, json=payload)
+                if r.status_code == 200:
+                    data = r.json()
+                    # expect list of vectors
+                    if isinstance(data, list) and len(data) >= 1:
+                        qvec = data[0]
+                        scores = []
+                        from math import sqrt
+                        def dot(a,b):
+                            return sum(x*y for x,y in zip(a,b))
+                        for i, lab in enumerate(icons):
+                            vec = data[i+1]
+                            # cosine similarity
+                            denom = (sqrt(dot(qvec,qvec))*sqrt(dot(vec,vec))) or 1.0
+                            sim = dot(qvec, vec) / denom
+                            scores.append((sim, lab))
+                        scores.sort(key=lambda x: x[0], reverse=True)
+                        results = [ { 'id': l['id'], 'label': l['label'], 'score': float(s) } for s,l in scores[:req.top_k] ]
+                        return { 'results': results }
+    except Exception as e:
+        print('Embeddings search failed:', e)
+
+    # fallback fuzzy substring scoring
+    def fuzzy_score(a, b):
+        a = a.lower(); b = b.lower()
+        if a == b: return 100
+        if a in b: return 80
+        if b in a: return 60
+        # partial match
+        import difflib
+        return int(difflib.SequenceMatcher(None, a, b).ratio() * 100)
+
+    scored = []
+    for ic in icons:
+        s = fuzzy_score(q, ic['label'])
+        scored.append((s, ic))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    results = [ { 'id': ic['id'], 'label': ic['label'], 'score': int(s) } for s, ic in scored[:req.top_k] ]
+    return { 'results': results }
+
+
+class RefineRequest(BaseModel):
+    imageBase64: str
+    style_prompt: str
+    strength: Optional[float] = 0.6
+
+
+@app.post('/refine-style')
+async def refine_style(req: RefineRequest):
+    # decode image
+    try:
+        img_b = _decode_data_url(req.imageBase64) if req.imageBase64.startswith('data:') else base64.b64decode(req.imageBase64)
+    except Exception:
+        raise HTTPException(status_code=400, detail='invalid imageBase64')
+
+    # Prefer HF image-to-image or local refiner if available
+    hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
+    hf_model = os.environ.get('HUGGINGFACE_REFINE_MODEL') or os.environ.get('HUGGINGFACE_MODEL')
+    if hf_token and hf_model:
         try:
-            if hf_token:
-                # call embeddings endpoint for query and icon labels
-                model = os.environ.get('HF_EMBEDDING_MODEL') or 'sentence-transformers/all-MiniLM-L6-v2'
-                url = f'https://api-inference.huggingface.co/models/{model}'
-                headers = {'Authorization': f'Bearer {hf_token}'}
-                # prepare inputs: list of texts (first is query)
-                texts = [q] + [i['label'] for i in icons]
-                payload = { 'inputs': texts }
-                async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-                    r = await client.post(url, headers=headers, json=payload)
-                    if r.status_code == 200:
-                        data = r.json()
-                        # expect list of vectors
-                        if isinstance(data, list) and len(data) >= 1:
-                            qvec = data[0]
-                            scores = []
-                            from math import sqrt
-                            def dot(a,b):
-                                return sum(x*y for x,y in zip(a,b))
-                            for i, lab in enumerate(icons):
-                                vec = data[i+1]
-                                # cosine similarity
-                                denom = (sqrt(dot(qvec,qvec))*sqrt(dot(vec,vec))) or 1.0
-                                sim = dot(qvec, vec) / denom
-                                scores.append((sim, lab))
-                            scores.sort(key=lambda x: x[0], reverse=True)
-                            results = [ { 'id': l['id'], 'label': l['label'], 'score': float(s) } for s,l in scores[:req.top_k] ]
-                            return { 'results': results }
+            url = f'https://api-inference.huggingface.co/models/{hf_model}'
+            headers = {'Authorization': f'Bearer {hf_token}'}
+            files = { 'image': ('input.png', img_b, 'image/png') }
+            data = { 'parameters': { 'prompt': req.style_prompt, 'strength': req.strength } }
+            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+                r = await client.post(url, headers=headers, files=files, data=data)
+                if r.status_code == 200:
+                    return { 'image': 'data:image/png;base64,' + base64.b64encode(r.content).decode('utf-8') }
+                else:
+                    raise Exception(f'HF refine status {r.status_code} {r.text[:200]}')
         except Exception as e:
-            print('Embeddings search failed:', e)
+            print('HF refine failed:', e)
 
-        # fallback fuzzy substring scoring
-        def fuzzy_score(a, b):
-            a = a.lower(); b = b.lower()
-            if a == b: return 100
-            if a in b: return 80
-            if b in a: return 60
-            # partial match
-            import difflib
-            return int(difflib.SequenceMatcher(None, a, b).ratio() * 100)
-
-        scored = []
-        for ic in icons:
-            s = fuzzy_score(q, ic['label'])
-            scored.append((s, ic))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        results = [ { 'id': ic['id'], 'label': ic['label'], 'score': int(s) } for s, ic in scored[:req.top_k] ]
-        return { 'results': results }
-
-
-    class RefineRequest(BaseModel):
-        imageBase64: str
-        style_prompt: str
-        strength: Optional[float] = 0.6
-
-
-    @app.post('/refine-style')
-    async def refine_style(req: RefineRequest):
-        # decode image
+    # Attempt local refine using diffusers refiner if available
+    if USE_LOCAL_DIFFUSION:
         try:
-            img_b = _decode_data_url(req.imageBase64) if req.imageBase64.startswith('data:') else base64.b64decode(req.imageBase64)
-        except Exception:
-            raise HTTPException(status_code=400, detail='invalid imageBase64')
+            # run a simple local refiner call in thread
+            def _local_refine():
+                # this is a best-effort path; reuse loaded pipelines if available
+                base, refiner = _load_local_pipelines(device=os.environ.get('LOCAL_DEVICE','cuda'))
+                # load image into PIL
+                from PIL import Image
+                from io import BytesIO
+                img = Image.open(BytesIO(img_b)).convert('RGB')
+                out = refiner(image=img, prompt=req.style_prompt, strength=req.strength, num_inference_steps=30).images[0]
+                buf = BytesIO()
+                out.save(buf, format='PNG')
+                return buf.getvalue()
 
-        # Prefer HF image-to-image or local refiner if available
-        hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
-        hf_model = os.environ.get('HUGGINGFACE_REFINE_MODEL') or os.environ.get('HUGGINGFACE_MODEL')
-        if hf_token and hf_model:
+            out_bytes = await asyncio.to_thread(_local_refine)
+            return { 'image': 'data:image/png;base64,' + base64.b64encode(out_bytes).decode('utf-8') }
+        except Exception as e:
+            print('local refine failed:', e)
+
+    raise HTTPException(status_code=501, detail='No available refine model configured (set HUGGINGFACE_API_TOKEN and HUGGINGFACE_REFINE_MODEL or enable USE_LOCAL_DIFFUSION)')
+
+
+class RefineLoopRequest(BaseModel):
+    prompt: str
+    width: Optional[int] = 512
+    height: Optional[int] = 512
+    steps: Optional[int] = 20
+    guidance_scale: Optional[float] = 7.5
+    target_ocr_score: Optional[int] = 20
+    max_iters: Optional[int] = 3
+    init_imageBase64: Optional[str] = None
+
+
+@app.post('/generate/refine-loop')
+async def generate_refine_loop(req: RefineLoopRequest):
+    """Orchestrate generate -> SR -> OCR -> inpaint loop to improve legibility.
+    Best-effort: will use HF/local refine where available and return final candidates + logs.
+    """
+    # 1) basic input validation
+    if not req.prompt:
+        raise HTTPException(status_code=400, detail='prompt required')
+
+    try:
+        # If an initial image is provided, run the refinement loop on that image
+        results = []
+        if req.init_imageBase64:
+            # Use the provided image as a single 'init' candidate
+            results = [{ 'provider': 'init', 'images': [req.init_imageBase64] }]
+            # Temporary debug: confirm we received the init image
             try:
-                url = f'https://api-inference.huggingface.co/models/{hf_model}'
-                headers = {'Authorization': f'Bearer {hf_token}'}
-                files = { 'image': ('input.png', img_b, 'image/png') }
-                data = { 'parameters': { 'prompt': req.style_prompt, 'strength': req.strength } }
-                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
-                    r = await client.post(url, headers=headers, files=files, data=data)
-                    if r.status_code == 200:
-                        return { 'image': 'data:image/png;base64,' + base64.b64encode(r.content).decode('utf-8') }
+                b = _decode_data_url(req.init_imageBase64) if req.init_imageBase64.startswith('data:') else base64.b64decode(req.init_imageBase64)
+                return { 'debug': 'received_init_image', 'image_bytes': len(b) }
+            except Exception as e:
+                return { 'debug': 'received_init_image_but_decode_failed', 'error': str(e) }
+        else:
+            # Compose a GenerateLogoRequest to reuse existing generation paths
+            greq = GenerateLogoRequest(prompt=req.prompt, width=req.width, height=req.height, steps=req.steps, guidance_scale=req.guidance_scale)
+
+            # Run multi-provider generation to get candidates
+            try:
+                multi = await generate_multi(greq)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f'multi generation failed: {str(e)}')
+
+            results = multi.get('results', []) if isinstance(multi, dict) else []
+    except Exception as debug_e:
+        # Temporary: surface debug info in response body to aid local debugging
+        import traceback
+        tb = traceback.format_exc()
+        return { 'detail': 'debug_error', 'error': str(debug_e), 'trace': tb }
+    out_candidates = []
+
+    for item in results:
+        candidate_log = { 'provider': item.get('provider') if isinstance(item, dict) else 'unknown', 'attempts': [] }
+        # decode image bytes
+        try:
+            img_dataurl = item.get('images', [None])[0] if isinstance(item, dict) else None
+            if not img_dataurl:
+                candidate_log['error'] = 'no_image'
+                out_candidates.append(candidate_log)
+                continue
+            img_bytes = _decode_data_url(img_dataurl) if img_dataurl.startswith('data:') else base64.b64decode(img_dataurl)
+        except Exception as e:
+            candidate_log['error'] = 'invalid_image'
+            candidate_log['details'] = str(e)
+            out_candidates.append(candidate_log)
+            continue
+
+        # iterative loop
+        cur_bytes = img_bytes
+        final_bytes = cur_bytes
+        achieved_score = 0
+        for itr in range(int(req.max_iters or 1)):
+            step_log = { 'iteration': itr+1 }
+            # optional SR
+            try:
+                do_sr = os.environ.get('POSTPROCESS_SR', '0')
+                if str(do_sr).lower() in ('1', 'true', 'yes') and super_resolve:
+                    try:
+                        cur_bytes = await super_resolve(cur_bytes, mode=os.environ.get('POSTPROCESS_SR_MODE','hf'))
+                        step_log['sr'] = 'applied'
+                    except Exception as e:
+                        step_log['sr_error'] = str(e)
+            except Exception:
+                pass
+
+            # OCR
+            ocr_text = ''
+            try:
+                if ocr_text_from_bytes:
+                    ocr_text = ocr_text_from_bytes(cur_bytes)
+                    step_log['ocr_text'] = ocr_text
+                    step_log['ocr_len'] = len(ocr_text.strip())
+            except Exception as e:
+                step_log['ocr_error'] = str(e)
+
+            achieved_score = len((ocr_text or '').strip())
+            # check threshold
+            if achieved_score >= int(req.target_ocr_score or 0):
+                step_log['status'] = 'ok'
+                candidate_log['attempts'].append(step_log)
+                final_bytes = cur_bytes
+                break
+
+            # else attempt inpainting refinement around low-confidence text boxes
+            if detect_text_bboxes and make_mask_from_boxes:
+                try:
+                    boxes = detect_text_bboxes(cur_bytes, min_confidence=15)
+                    if boxes:
+                        boxes = expand_boxes_by_ratio(boxes, ratio=0.25)
+                        mask_png = make_mask_from_boxes(cur_bytes, boxes, pad=8)
+                        # call HF image-to-image refine if available
+                        hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
+                        hf_model = os.environ.get('HUGGINGFACE_REFINE_MODEL') or os.environ.get('HUGGINGFACE_MODEL')
+                        refined = None
+                        if hf_token and hf_model:
+                            try:
+                                url = f'https://api-inference.huggingface.co/models/{hf_model}'
+                                headers = {'Authorization': f'Bearer {hf_token}'}
+                                files = {
+                                    'image': ('input.png', cur_bytes, 'image/png'),
+                                    'mask': ('mask.png', mask_png, 'image/png')
+                                }
+                                data = { 'parameters': { 'prompt': req.prompt + ' Improve text legibility and make text crisp and high-contrast.', 'strength': 0.8 } }
+                                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+                                    r = await client.post(url, headers=headers, files=files, data=data)
+                                    if r.status_code == 200:
+                                        refined = r.content
+                                        step_log['inpaint'] = 'hf'                    
+                            except Exception as e:
+                                step_log['inpaint_error'] = f'hf:{str(e)}'
+
+                        # Attempt local refine fallback
+                        if refined is None and USE_LOCAL_DIFFUSION:
+                            try:
+                                def _local_inpaint():
+                                    base, refiner = _load_local_pipelines(device=os.environ.get('LOCAL_DEVICE','cuda'))
+                                    from PIL import Image
+                                    from io import BytesIO
+                                    img = Image.open(BytesIO(cur_bytes)).convert('RGB')
+                                    mask = Image.open(BytesIO(mask_png)).convert('L')
+                                    out = refiner(image=img, mask_image=mask, prompt=req.prompt + ' Improve text legibility and make text crisp and high-contrast.', strength=0.8, num_inference_steps=25).images[0]
+                                    buf = BytesIO()
+                                    out.save(buf, format='PNG')
+                                    return buf.getvalue()
+
+                                refined = await asyncio.to_thread(_local_inpaint)
+                                step_log['inpaint'] = 'local'
+                            except Exception as e:
+                                step_log['inpaint_error_local'] = str(e)
+
+                        if refined:
+                            cur_bytes = refined
+                            step_log['inpaint_applied'] = True
+                        else:
+                            step_log['inpaint_applied'] = False
                     else:
-                        raise Exception(f'HF refine status {r.status_code} {r.text[:200]}')
-            except Exception as e:
-                print('HF refine failed:', e)
+                        step_log['inpaint'] = 'no_boxes'
+                except Exception as e:
+                    step_log['inpaint_error'] = str(e)
 
-        # Attempt local refine using diffusers refiner if available
-        if USE_LOCAL_DIFFUSION:
-            try:
-                # run a simple local refiner call in thread
-                def _local_refine():
-                    # this is a best-effort path; reuse loaded pipelines if available
-                    base, refiner = _load_local_pipelines(device=os.environ.get('LOCAL_DEVICE','cuda'))
-                    # load image into PIL
-                    from PIL import Image
-                    from io import BytesIO
-                    img = Image.open(BytesIO(img_b)).convert('RGB')
-                    out = refiner(image=img, prompt=req.style_prompt, strength=req.strength, num_inference_steps=30).images[0]
-                    buf = BytesIO()
-                    out.save(buf, format='PNG')
-                    return buf.getvalue()
+            candidate_log['attempts'].append(step_log)
+            final_bytes = cur_bytes
 
-                out_bytes = await asyncio.to_thread(_local_refine)
-                return { 'image': 'data:image/png;base64,' + base64.b64encode(out_bytes).decode('utf-8') }
-            except Exception as e:
-                print('local refine failed:', e)
+        # end iterations for this candidate
+        candidate_log['final_ocr_len'] = achieved_score
+        candidate_log['result_image'] = 'data:image/png;base64,' + base64.b64encode(final_bytes).decode('utf-8')
+        out_candidates.append(candidate_log)
 
-        raise HTTPException(status_code=501, detail='No available refine model configured (set HUGGINGFACE_API_TOKEN and HUGGINGFACE_REFINE_MODEL or enable USE_LOCAL_DIFFUSION)')
+    return { 'candidates': out_candidates }
