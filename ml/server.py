@@ -607,4 +607,40 @@ async def generate_stability(req: StabilityRequest):
         )
         return { 'images': images, 'source': 'stability', 'width': out_w, 'height': out_h }
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f'Stability generation failed: {str(e)}')
+        # If Stability fails due to payment/engine entitlement errors, fall
+        # back to Hugging Face inference (if configured). Be defensive and
+        # only trigger fallback for likely payment/engine issues to avoid
+        # masking other runtime errors.
+        err_text = str(e)
+        low = err_text.lower()
+        is_engine_or_payment = (
+            '402' in err_text or 'payment' in low or 'insufficient' in low and 'credit' in low
+            or ('engine' in low and ('not found' in low or 'notfound' in low))
+        )
+
+        hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
+        if is_engine_or_payment and hf_token:
+            try:
+                print(f"Stability failed with engine/payment error, falling back to HF: {err_text[:200]}")
+                # Construct a compatible GenerateLogoRequest and call the HF path
+                hf_req = GenerateLogoRequest(
+                    prompt=req.prompt,
+                    width=req.width or 512,
+                    height=req.height or 512,
+                    steps=req.steps or 20,
+                    guidance_scale=req.cfg_scale or 7.5
+                )
+                hf_result = await generate_logo(hf_req)
+                # annotate fallback and return
+                if isinstance(hf_result, dict):
+                    hf_result.setdefault('fallback_from', 'stability')
+                    hf_result.setdefault('source', hf_result.get('source', 'huggingface'))
+                return hf_result
+            except HTTPException as he:
+                # HF fallback produced an HTTPException; surface combined info
+                raise HTTPException(status_code=502, detail=f'Stability failed: {err_text}; HF fallback failed: {str(he)}')
+            except Exception as he:
+                raise HTTPException(status_code=502, detail=f'Stability failed: {err_text}; HF fallback exception: {str(he)}')
+
+        # Not an engine/payment issue or no HF token available — surface original error
+        raise HTTPException(status_code=502, detail=f'Stability generation failed: {err_text}')
