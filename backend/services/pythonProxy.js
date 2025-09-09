@@ -5,7 +5,7 @@ export function isPythonConfigured() {
 }
 
 const LOGO_NEGATIVE_PROMPT = 'no people, no faces, no hands, no photographic scenes, no stock photos, no watermarks, no signatures, no unrelated text overlays, avoid realistic backgrounds; produce clean vector-like artwork suitable for logos.'
-const CARD_NEGATIVE_PROMPT = 'no people, no faces, no animals, no photographs, no busy scenes, no unrelated props, no watermarks, no logos of other brands, no text artifacts, no distorted or unreadable typography, no OCR-like characters, avoid overly complex photographic backgrounds; produce a clean, flat, print-ready card mockup or vector-friendly layout with sharp, legible text and correct margins.'
+const CARD_NEGATIVE_PROMPT = 'no people, no faces, no animals, no photographs, no busy scenes, no unrelated props, no watermarks, no logos of other brands, no text artifacts, no distorted or unreadable typography, no OCR-like characters, avoid overly complex photographic backgrounds, no abstract art, no geometric patterns, no artistic elements, no kaleidoscopic designs, no glitch art, no symmetrical abstract shapes, no colorful geometric compositions, no architectural abstract forms, no crystalline patterns, no fragmented designs, no neon effects, no glowing abstract elements, no images, no graphics, no shapes, no colors, no patterns, no designs, no artwork, no illustrations, no visual elements except plain black text on white background; produce ONLY plain black text on white background with no other visual elements.'
 
 // Forward payload to python ML endpoint at `path` (relative) while appending a negative_prompt.
 // If payload already contains negative_prompt, append the defaults (separated by comma) instead of overwriting.

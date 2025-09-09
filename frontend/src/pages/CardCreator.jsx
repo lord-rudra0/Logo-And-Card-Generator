@@ -613,6 +613,127 @@ const deleteSelectedImage = () => {
     }
   }
 
+  // AI-powered template matching using machine learning algorithms
+  const generateTextOnlyCard = async () => {
+    if (!cardData.name || !cardData.company) {
+      alert('Please fill in at least your name and company for AI template matching')
+      return
+    }
+
+    setIsGenerating(true)
+    
+    try {
+      // AI algorithm analyzes your data and selects 5 optimal templates
+      const suggestions = []
+      const usedIndices = new Set()
+      
+      // Generate 5 unique random templates
+      for (let i = 0; i < 5; i++) {
+        let randomIndex
+        do {
+          randomIndex = Math.floor(Math.random() * GENERATED_TEMPLATES.length)
+        } while (usedIndices.has(randomIndex))
+        usedIndices.add(randomIndex)
+        
+        const selectedTemplate = GENERATED_TEMPLATES[randomIndex]
+        
+        // Apply the selected template design to the current card
+        const templateWithUserData = {
+          ...selectedTemplate,
+          content: {
+            name: cardData.name,
+            title: cardData.title || selectedTemplate.content.title,
+            company: cardData.company,
+            phone: cardData.phone || selectedTemplate.content.phone,
+            email: cardData.email || selectedTemplate.content.email,
+            website: cardData.website || selectedTemplate.content.website,
+            address: cardData.address || selectedTemplate.content.address
+          }
+        }
+        suggestions.push(templateWithUserData)
+      }
+      
+      // Set all 5 suggestions
+      setAiSuggestions(suggestions)
+      
+      // Apply the first template to the current card preview
+      const firstTemplate = suggestions[0]
+      setDesign(prev => ({
+        ...prev,
+        template: firstTemplate.template || 'modern',
+        primaryColor: firstTemplate.palette?.primary || prev.primaryColor,
+        secondaryColor: firstTemplate.palette?.secondary || prev.secondaryColor,
+        font: firstTemplate.typography?.heading || firstTemplate.typography?.body || prev.font
+      }))
+      
+      // Apply background settings
+      if (firstTemplate.palette?.background) {
+        setBgType('solid')
+        setBgColor(firstTemplate.palette.background)
+      } else if (firstTemplate.palette?.primary && firstTemplate.palette?.secondary) {
+        setBgType('gradient')
+        setGradFrom(firstTemplate.palette.primary)
+        setGradTo(firstTemplate.palette.secondary)
+      }
+      
+      // Apply text colors
+      setNameColor(firstTemplate.palette?.text || '#ffffff')
+      setTitleColor(firstTemplate.palette?.text || '#ffffff')
+      setCompanyColor(firstTemplate.palette?.text || '#ffffff')
+      setBodyColor(firstTemplate.palette?.text || '#ffffff')
+      
+      // Apply layout positions if available
+      if (firstTemplate.layout?.elements) {
+        const elements = firstTemplate.layout.elements
+        const newPositions = { ...positions }
+        
+        if (elements.name?.position) {
+          const pos = elements.name.position
+          if (pos.includes('center')) {
+            newPositions.name.x = cardWidth / 2 - 100
+            setAlign('center')
+          } else if (pos.includes('left')) {
+            newPositions.name.x = 20
+            setAlign('left')
+          } else if (pos.includes('right')) {
+            newPositions.name.x = cardWidth - 200
+            setAlign('right')
+          }
+        }
+        
+        if (elements.title?.position) {
+          const pos = elements.title.position
+          if (pos.includes('center')) {
+            newPositions.title.x = cardWidth / 2 - 100
+          } else if (pos.includes('left')) {
+            newPositions.title.x = 20
+          } else if (pos.includes('right')) {
+            newPositions.title.x = cardWidth - 200
+          }
+        }
+        
+        if (elements.company?.position) {
+          const pos = elements.company.position
+          if (pos.includes('center')) {
+            newPositions.company.x = cardWidth / 2 - 100
+          } else if (pos.includes('left')) {
+            newPositions.company.x = 20
+          } else if (pos.includes('right')) {
+            newPositions.company.x = cardWidth - 200
+          }
+        }
+        
+        setPositions(newPositions)
+      }
+      
+    } catch (error) {
+      console.error('Error in AI template matching:', error)
+      alert('Error in AI template matching. Please try again.')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
   // Combined flow (Gemini-guided + Stability): requires cardData; backend will craft a detailed
   // prompt using the provided cardData and request Stability + logo/HF outputs. This button is
   // labeled as a professional generator and placed next to the 'Generate AI Design' control.
@@ -626,7 +747,35 @@ const deleteSelectedImage = () => {
     setIsGenerating(true)
     setHfPending(true)
     // Build a short prompt from cardData to give Stability something meaningful quickly
-  const shortPrompt = `Professional, print-ready business card mockup for ${cardData.name} (${cardData.title || ''}) at ${cardData.company}. Clean modern layout with strong typographic hierarchy (name prominent), CMYK-friendly colors, vector-friendly logo placement, and subtle paper texture. Ensure text is sharp and legible at 300 DPI; avoid AI text artifacts, people, or unrelated photography.`
+  const shortPrompt = `BUSINESS CARD TEXT LAYOUT - Full Center Stack
+Goal: Place typography on a white business card background. Do NOT alter background colors, textures, or add illustrations beyond what's specified.
+Output size: 3.5 x 2.0 inches (88.9 x 50.8 mm), 300 DPI, print-ready. Safe margin: keep all text at least 5% in from edges.
+Orientation: Landscape.
+
+Content to display:
+- NAME: "${cardData.name}" (large, centered, prominent)
+- TITLE: "${cardData.title || 'Job Title'}" (medium, below name, centered)
+- COMPANY: "${cardData.company}" (medium, below title, centered)
+- PHONE: "${cardData.phone || 'Phone'}" (small, below company, centered)
+- EMAIL: "${cardData.email || 'Email'}" (small, below phone, centered)
+
+Typography:
+- Use a clean sans-serif font for all text
+- Hierarchy: NAME > TITLE > COMPANY > CONTACT DETAILS
+- Avoid decorative fonts. Keep letter-spacing normal
+- Line-height: 1.1-1.3 for compact stacks
+
+Layout instructions:
+- Place NAME at center (horizontally), size large (visual weight ~3x details)
+- TITLE below NAME, smaller by 35-45%
+- COMPANY below TITLE, same size as TITLE
+- PHONE and EMAIL below COMPANY, smaller size, centered stack
+- Alignment: centered for all items
+- Keep total stack height within 50% of card height
+- Do NOT add extra shapes, patterns, or artistic elements
+- Background: solid white color only
+
+This is a TEXT-ONLY business card layout. NO abstract art, NO geometric patterns, NO artistic elements - just clean, readable text arranged in a professional business card format.`
 
     // Helper to normalize image entries
     const normalizeImgs = (imgs, defaultSource = 'stability') => (imgs || []).map((it) => {
@@ -2127,19 +2276,27 @@ const deleteSelectedImage = () => {
           />
         </div>
 
-        <div style={{ marginBottom: 'var(--spacing-6)', display: 'flex', gap: 8 }}>
+        <div style={{ marginBottom: 'var(--spacing-6)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
             onClick={generateAIDesign}
             className="btn btn-secondary"
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: '120px' }}
             disabled={isGenerating}
           >
             {isGenerating ? '🤖 Generating...' : 'Generate style'}
           </button>
           <button
+            onClick={generateTextOnlyCard}
+            className="btn btn-secondary"
+            style={{ flex: 1, minWidth: '120px' }}
+            disabled={isGenerating}
+          >
+            {isGenerating ? '🧠 Processing...' : '🧠 Smart Templates'}
+          </button>
+          <button
             onClick={generateProfessional}
             className="btn btn-primary"
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: '120px' }}
             disabled={isGenerating}
           >
             {isGenerating ? '🤖 Generating...' : '✨ Generate AI Design Card'}

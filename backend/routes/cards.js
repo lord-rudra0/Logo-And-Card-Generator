@@ -259,7 +259,38 @@ router.post('/generate-card-image', async (req, res) => {
 
         // Combined mode: craft a Gemini prompt server-side (if available) and request both stability and logo generator
         if (req.body && req.body.mode === 'combined') {
-          let craftedPrompt = `High-quality, flat, print-ready business card design (no photoreal mockups) for ${cardData.name} (${cardData.title || ''}) at ${cardData.company}. Include company name or initials as a visible branding element. Style: modern, print-ready, vector-friendly, strong typographic hierarchy, brand color palette, ample negative space. Deliver: 1) flat front-facing card layout suitable for export (svg/png), 2) optional neutral mockup (flat front-facing, no perspective) for presentation only. Avoid people, faces, logos of other brands, watermarks, or busy photographic backgrounds. Ensure typography is legible and the logo/text scale is appropriate for small print.`
+          // Use a specific business card template from the JSON file
+          const businessCardTemplate = `BUSINESS CARD TEXT LAYOUT - Full Center Stack
+Goal: Place typography on a white business card background. Do NOT alter background colors, textures, or add illustrations beyond what's specified.
+Output size: 3.5 x 2.0 inches (88.9 x 50.8 mm), 300 DPI, print-ready. Safe margin: keep all text at least 5% in from edges.
+Orientation: Landscape.
+
+Content to display:
+- NAME: "${cardData.name}" (large, centered, prominent)
+- TITLE: "${cardData.title || 'Job Title'}" (medium, below name, centered)
+- COMPANY: "${cardData.company}" (medium, below title, centered)
+- PHONE: "${cardData.phone || 'Phone'}" (small, below company, centered)
+- EMAIL: "${cardData.email || 'Email'}" (small, below phone, centered)
+
+Typography:
+- Use a clean sans-serif font for all text
+- Hierarchy: NAME > TITLE > COMPANY > CONTACT DETAILS
+- Avoid decorative fonts. Keep letter-spacing normal
+- Line-height: 1.1-1.3 for compact stacks
+
+Layout instructions:
+- Place NAME at center (horizontally), size large (visual weight ~3x details)
+- TITLE below NAME, smaller by 35-45%
+- COMPANY below TITLE, same size as TITLE
+- PHONE and EMAIL below COMPANY, smaller size, centered stack
+- Alignment: centered for all items
+- Keep total stack height within 50% of card height
+- Do NOT add extra shapes, patterns, or artistic elements
+- Background: solid white color only
+
+This is a TEXT-ONLY business card layout. NO abstract art, NO geometric patterns, NO artistic elements - just clean, readable text arranged in a professional business card format.`
+
+          let craftedPrompt = businessCardTemplate
           try {
             if (genAI) {
               const designs = await generateCardDesign(genAI, cardData, industry || 'business', 1)
@@ -362,10 +393,64 @@ router.post('/generate-card-image', async (req, res) => {
       }
     }
 
-    // Fallback: attempt to call the local aiService which may be a placeholder
+
+    // Fallback: create a simple text-based business card using canvas
     try {
-      const imageBase64 = await generateCardImage(genAI, cardData, industry || 'business', size)
-      return res.json({ success: true, images: [{ source: 'fallback', dataUrl: `data:image/png;base64,${imageBase64}` }] })
+      const canvas = require('canvas')
+      const { createCanvas } = canvas
+      
+      // Create a canvas for the business card (3.5" x 2" at 300 DPI)
+      const width = 1050  // 3.5 inches * 300 DPI
+      const height = 600  // 2 inches * 300 DPI
+      const canvasElement = createCanvas(width, height)
+      const ctx = canvasElement.getContext('2d')
+      
+      // White background
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, width, height)
+      
+      // Black text
+      ctx.fillStyle = '#000000'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      
+      // Add text elements
+      const centerX = width / 2
+      let currentY = height * 0.3
+      
+      // Name (large)
+      ctx.font = 'bold 48px Arial, sans-serif'
+      ctx.fillText(cardData.name || 'Your Name', centerX, currentY)
+      currentY += 60
+      
+      // Title (medium)
+      ctx.font = '32px Arial, sans-serif'
+      ctx.fillText(cardData.title || 'Job Title', centerX, currentY)
+      currentY += 50
+      
+      // Company (medium)
+      ctx.font = '32px Arial, sans-serif'
+      ctx.fillText(cardData.company || 'Company Name', centerX, currentY)
+      currentY += 60
+      
+      // Phone (small)
+      if (cardData.phone) {
+        ctx.font = '24px Arial, sans-serif'
+        ctx.fillText(cardData.phone, centerX, currentY)
+        currentY += 40
+      }
+      
+      // Email (small)
+      if (cardData.email) {
+        ctx.font = '24px Arial, sans-serif'
+        ctx.fillText(cardData.email, centerX, currentY)
+      }
+      
+      // Convert to base64
+      const buffer = canvasElement.toBuffer('image/png')
+      const imageBase64 = buffer.toString('base64')
+      
+      return res.json({ success: true, images: [{ source: 'text-fallback', dataUrl: `data:image/png;base64,${imageBase64}` }] })
     } catch (innerErr) {
       return res.status(501).json({ error: innerErr.message || 'Image generation not configured' })
     }

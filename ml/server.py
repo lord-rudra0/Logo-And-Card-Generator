@@ -346,7 +346,7 @@ async def compose_prompt(req: ComposePromptRequest):
             parts.append(', '.join(req.keywords))
         base = ', '.join(parts) if parts else 'business card, minimalist, clean'
         # add useful defaults for legibility and logo placement
-        base += ", high-resolution, clear legible text, centered logo area, simple color palette"
+        base += ", TEXT-ONLY business card, white background, black text, no images, no graphics, no shapes, no colors except black text on white, plain text layout only, NO abstract art, NO geometric patterns, NO artistic elements"
         return base
 
     hf_token = os.environ.get('HUGGINGFACE_API_TOKEN') or os.environ.get('HF_TOKEN')
