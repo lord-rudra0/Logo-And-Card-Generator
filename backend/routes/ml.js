@@ -8,7 +8,10 @@ import { createJob, getJob } from '../services/jobQueue.js'
 
 const router = express.Router()
 
-const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
+// One-time Gemini warning guard (avoid spamming logs per-request)
+let _geminiWarned = false
+
+const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || 'http://localhost:8000'
 
 // Simple request-id middleware and proxy helper that forwards the id
 const generateReqId = () => {
@@ -94,13 +97,70 @@ router.post('/ocr', async (req, res) => {
 router.post('/generate-logo', async (req, res) => {
   try {
     const payload = req.body || {}
+
+    // Enforce recommended defaults for legibility and output quality
+    const enforceDefaults = (p) => {
+      const out = Object.assign({}, p)
+      // default steps/guidance
+      out.steps = out.steps && Number(out.steps) > 0 ? Number(out.steps) : 30
+      out.guidance_scale = out.guidance_scale || out.guidance || 7.5
+
+      // enforce reasonable minimum dimensions for readable text
+      try {
+        const minW = 1024
+        const minH = 640
+        let w = out.width ? Number(out.width) : minW
+        let h = out.height ? Number(out.height) : minH
+        if (!w || !h) { w = minW; h = minH }
+        // if either dimension is below minimum, scale up preserving aspect
+        if (w < minW || h < minH) {
+          const scaleX = minW / w
+          const scaleY = minH / h
+          const scale = Math.max(scaleX, scaleY)
+          w = Math.ceil(w * scale)
+          h = Math.ceil(h * scale)
+        }
+        out.width = w
+        out.height = h
+      } catch (e) {
+        out.width = out.width || 1024
+        out.height = out.height || 640
+      }
+
+      // Append legibility-focused instructions to prompt/description
+      const instr = ' High-resolution, sharp, legible sans-serif typography; large readable name and contact text; no random glyphs — render any text exactly as provided; flat vector-style logo, single-color or two-color, no text inside logo except initials; avoid photoreal or metallic reflections that reduce legibility.'
+      if (out.prompt && typeof out.prompt === 'string') {
+        if (!out.prompt.toLowerCase().includes('legible') && !out.prompt.includes('no random glyphs')) {
+          out.prompt = out.prompt.trim() + ' ' + instr
+        }
+      } else if (out.description && typeof out.description === 'string') {
+        if (!out.description.toLowerCase().includes('legible') && !out.description.includes('no random glyphs')) {
+          out.description = out.description.trim() + ' ' + instr
+        }
+      } else {
+        out.prompt = instr.trim()
+      }
+
+  // Enable server-side postprocessing (SR/upscale/unsharp) by default
+  out.postprocess = out.postprocess !== undefined ? out.postprocess : true
+  out.postprocess_sr = out.postprocess_sr !== undefined ? out.postprocess_sr : true
+  out.postprocess_upscale = out.postprocess_upscale || 1.5
+  out.postprocess_unsharp_radius = out.postprocess_unsharp_radius || 1.0
+  out.postprocess_unsharp_percent = out.postprocess_unsharp_percent || 150.0
+  out.postprocess_unsharp_threshold = out.postprocess_unsharp_threshold || 3
+  out.postprocess_autocontrast = out.postprocess_autocontrast !== undefined ? out.postprocess_autocontrast : true
+
+      return out
+    }
+
+    const enforcedPayload = enforceDefaults(payload)
     // support async job creation: ?async=true
     const wantAsync = req.query && String(req.query.async) === 'true'
     if (wantAsync) {
       const job = createJob(async (updateProgress) => {
         // preliminary progress
         updateProgress(5)
-  const data = await forwardToPython('generate/logo', payload, { req })
+  const data = await forwardToPython('generate/logo', enforcedPayload, { req })
         updateProgress(60)
         const imgs = data.images || data.generated_images || []
         const saved = imgs.map((d) => {
@@ -122,7 +182,7 @@ router.post('/generate-logo', async (req, res) => {
     }
     if (PY_ML_URL) {
       try {
-  const data = await forwardToPython('generate/logo', payload, { req })
+  const data = await forwardToPython('generate/logo', enforcedPayload, { req })
         // if data contains data.images or images as data URLs, save them to cache and return URLs
         const imgs = data.images || data.generated_images || []
         const saved = imgs.map((d) => {
@@ -173,12 +233,14 @@ router.post('/generate-logo-gemini', async (req, res) => {
     // Build a human-friendly briefing for Gemini
     const brief = `Company: ${companyName || 'Unnamed Company'}\nTagline: ${tagline || ''}\nInitials: ${initials || ''}\nIndustry: ${resolvedIndustry}\nStyle: ${style || 'modern/minimal'}\nColors: primary=${primaryColor || ''}, secondary=${secondaryColor || ''}`
 
+  // Ensure companyToken is always defined (used later for enforcement)
+  const companyToken = (companyName && String(companyName).trim()) || (initials && String(initials).trim()) || ''
+
     // Try to call Gemini (Google Generative API) if configured
     let detailedPrompt = null
     const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null
-    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'models/gemini-1.0'
-    if (GEMINI_KEY) {
-      const companyToken = (companyName && String(companyName).trim()) || (initials && String(initials).trim()) || ''
+    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
+  if (GEMINI_KEY) {
       try {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta2/${GEMINI_MODEL}:generateText`
   const promptText = `You are a professional logo designer and prompt engineer for image generation models. Given the following company brief, produce a concise but richly detailed Stable Diffusion / image-model prompt that will produce logo-style outputs (clean, vector-like, high-fidelity) directly tied to the brief. The generated prompt must clearly describe: composition, iconography, color palette (include primary and secondary), typography, focal point, negative space, materials/finish (for mockups), and an explicit negative-prompt section that prevents unrelated photographic content. IMPORTANT: the final prompt must explicitly include the company name, the company's first word, or the company's initials (whichever is available) as a visible textual or graphical element in the logo. If initials are provided, prefer using them as a dominant monogram motif. Require output suitable for both digital and print (scalable, crisp edges, transparent background recommended). Avoid people, landscapes, busy textures, stock photo elements, signatures, watermarks, or existing-brand logos.\n\nBrief:\n${brief}\n\nRespond only with the final prompt string.`
@@ -205,8 +267,17 @@ router.post('/generate-logo-gemini', async (req, res) => {
             detailedPrompt = j
           }
         } else {
-          const text = await r.text()
-          console.warn('Gemini call failed', r.status, text)
+          // Allow opt-out of noisy Gemini warnings (useful in local dev without a valid key)
+          const suppress = process.env.SUPPRESS_GEMINI_WARN === '1'
+          if (!suppress && !_geminiWarned) {
+            _geminiWarned = true
+            if (r.status === 401) {
+              console.warn('Gemini call failed: 401 Unauthorized. Check GEMINI_API_KEY or unset it to disable Gemini. (details suppressed)')
+            } else {
+              const text = await r.text()
+              console.warn('Gemini call failed', r.status, text && text.length > 200 ? text.slice(0, 200) + '...' : text)
+            }
+          }
         }
       } catch (e) {
         console.warn('Gemini call error:', e && e.message)
@@ -236,7 +307,31 @@ router.post('/generate-logo-gemini', async (req, res) => {
 
     // Support async job creation: ?async=true
     const wantAsync = req.query && String(req.query.async) === 'true'
-    const mlPayload = { prompt: detailedPrompt, count, width, height }
+    // enforce defaults similar to generate-logo route
+    const enforceGeminiDefaults = (p) => {
+      const out = Object.assign({}, p)
+      out.steps = out.steps && Number(out.steps) > 0 ? Number(out.steps) : 30
+      out.guidance_scale = out.guidance_scale || 7.5
+      out.width = out.width || 1024
+      out.height = out.height || 640
+      const instr = ' High-resolution, sharp, legible sans-serif typography; large readable name and contact text; no random glyphs — render any text exactly as provided; flat vector-style logo, single-color or two-color, no text inside logo except initials; avoid photoreal or metallic reflections that reduce legibility.'
+      if (out.prompt && typeof out.prompt === 'string') {
+        if (!out.prompt.toLowerCase().includes('legible') && !out.prompt.includes('no random glyphs')) {
+          out.prompt = out.prompt.trim() + ' ' + instr
+        }
+      }
+      return out
+    }
+
+    const mlPayload = enforceGeminiDefaults({ prompt: detailedPrompt, count, width, height })
+  // enable postprocess defaults for gemini path as well
+  mlPayload.postprocess = mlPayload.postprocess !== undefined ? mlPayload.postprocess : true
+  mlPayload.postprocess_sr = mlPayload.postprocess_sr !== undefined ? mlPayload.postprocess_sr : true
+  mlPayload.postprocess_upscale = mlPayload.postprocess_upscale || 1.5
+  mlPayload.postprocess_unsharp_radius = mlPayload.postprocess_unsharp_radius || 1.0
+  mlPayload.postprocess_unsharp_percent = mlPayload.postprocess_unsharp_percent || 150.0
+  mlPayload.postprocess_unsharp_threshold = mlPayload.postprocess_unsharp_threshold || 3
+  mlPayload.postprocess_autocontrast = mlPayload.postprocess_autocontrast !== undefined ? mlPayload.postprocess_autocontrast : true
 
     if (wantAsync) {
       const job = createJob(async (updateProgress) => {

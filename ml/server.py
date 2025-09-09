@@ -151,54 +151,78 @@ def _generate_local_image_sync(prompt, steps=40, high_noise_frac=0.8, width=512,
     return buf.read()
 
 
-def _postprocess_image_bytes(img_bytes: bytes) -> bytes:
-    """Optional lightweight post-processing to improve legibility of small card text.
-    Controlled by env var POSTPROCESS_ENABLED (default: true).
-    Parameters configurable via POSTPROCESS_UPSCALE (float, default 1.5)
-    and POSTPROCESS_UNSHARP_RADIUS/AMOUNT/THRESHOLD.
+def _postprocess_image_bytes(
+    img_bytes: bytes,
+    enabled: Optional[bool] = None,
+    upscale: Optional[float] = None,
+    unsharp_radius: Optional[float] = None,
+    unsharp_percent: Optional[float] = None,
+    unsharp_threshold: Optional[int] = None,
+    autocontrast: Optional[bool] = None,
+) -> bytes:
+    """Lightweight post-processing to improve legibility of small card text.
+    Parameters are per-call and if left None, fall back to environment defaults.
     Returns PNG bytes.
     """
-    enabled = os.environ.get('POSTPROCESS_ENABLED', '1')
-    if str(enabled).lower() in ('0', 'false', 'no'):
+    # resolve enabled flag
+    if enabled is None:
+        enabled_raw = os.environ.get('POSTPROCESS_ENABLED', '1')
+        enabled = not (str(enabled_raw).lower() in ('0', 'false', 'no'))
+    if not enabled:
         return img_bytes
     if not PIL_AVAILABLE:
         print('Pillow not available; skipping post-processing')
         return img_bytes
 
     try:
+        # resolve numeric params with env fallbacks
+        try:
+            if upscale is None:
+                upscale = float(os.environ.get('POSTPROCESS_UPSCALE', 1.5))
+        except Exception:
+            upscale = 1.5
+        try:
+            if unsharp_radius is None:
+                unsharp_radius = float(os.environ.get('POSTPROCESS_UNSHARP_RADIUS', 1.0))
+        except Exception:
+            unsharp_radius = 1.0
+        try:
+            if unsharp_percent is None:
+                unsharp_percent = float(os.environ.get('POSTPROCESS_UNSHARP_PERCENT', 150.0))
+        except Exception:
+            unsharp_percent = 150.0
+        try:
+            if unsharp_threshold is None:
+                unsharp_threshold = int(os.environ.get('POSTPROCESS_UNSHARP_THRESHOLD', 3))
+        except Exception:
+            unsharp_threshold = 3
+        if autocontrast is None:
+            ac_raw = os.environ.get('POSTPROCESS_AUTOCONTRAST', '1')
+            autocontrast = not (str(ac_raw).lower() in ('0', 'false', 'no'))
+
         buf = BytesIO(img_bytes)
         img = Image.open(buf).convert('RGBA')
 
         # upscale preserving aspect ratio
-        try:
-            upscale = float(os.environ.get('POSTPROCESS_UPSCALE', 1.5))
-        except Exception:
-            upscale = 1.5
-        if upscale and upscale > 1.01:
-            new_w = int(img.width * upscale)
-            new_h = int(img.height * upscale)
+        if upscale and float(upscale) > 1.01:
+            new_w = int(img.width * float(upscale))
+            new_h = int(img.height * float(upscale))
             img = img.resize((new_w, new_h), resample=Image.LANCZOS)
 
         # apply unsharp mask to emphasize text edges
         try:
-            us_radius = float(os.environ.get('POSTPROCESS_UNSHARP_RADIUS', 1.0))
-            us_percent = float(os.environ.get('POSTPROCESS_UNSHARP_PERCENT', 150.0))
-            us_threshold = int(os.environ.get('POSTPROCESS_UNSHARP_THRESHOLD', 3))
-            # PIL ImageFilter.UnsharpMask takes radius, percent, threshold
-            img = img.filter(ImageFilter.UnsharpMask(radius=us_radius, percent=int(us_percent), threshold=us_threshold))
+            img = img.filter(ImageFilter.UnsharpMask(radius=float(unsharp_radius), percent=int(unsharp_percent), threshold=int(unsharp_threshold)))
         except Exception as e:
             print('Unsharp failed:', e)
 
         # optional autocontrast to improve contrast on low-contrast renders
         try:
-            do_autocontrast = os.environ.get('POSTPROCESS_AUTOCONTRAST', '1')
-            if str(do_autocontrast).lower() not in ('0', 'false', 'no'):
+            if autocontrast:
                 img = ImageOps.autocontrast(img)
         except Exception:
             pass
 
         out_buf = BytesIO()
-        # save as PNG to preserve sharpness; convert back to RGBA/PNG
         img.save(out_buf, format='PNG')
         out_buf.seek(0)
         return out_buf.read()
@@ -279,6 +303,14 @@ class GenerateLogoRequest(BaseModel):
     height: Optional[int] = 512
     steps: Optional[int] = 20
     guidance_scale: Optional[float] = 7.5
+    # optional postprocess flags forwarded from backend
+    postprocess: Optional[bool] = None
+    postprocess_sr: Optional[bool] = None
+    postprocess_upscale: Optional[float] = None
+    postprocess_unsharp_radius: Optional[float] = None
+    postprocess_unsharp_percent: Optional[float] = None
+    postprocess_unsharp_threshold: Optional[int] = None
+    postprocess_autocontrast: Optional[bool] = None
 
 
 class ComposePromptRequest(BaseModel):
@@ -416,12 +448,17 @@ async def generate_with_score(req: GenerateLogoRequest):
             scored.append({ 'provider': item.get('provider','unknown'), 'error': 'invalid_image', 'details': str(e) })
             continue
 
-        # optional SR
+        # optional SR (use per-item meta if available)
         try:
-            do_sr = os.environ.get('POSTPROCESS_SR', '0')
-            if str(do_sr).lower() in ('1', 'true', 'yes') and super_resolve:
+            meta = item if isinstance(item, dict) else {}
+            do_sr = meta.get('postprocess_sr', None)
+            if do_sr is None:
+                do_sr_env = os.environ.get('POSTPROCESS_SR', '0')
+                do_sr = str(do_sr_env).lower() in ('1', 'true', 'yes')
+            if do_sr and super_resolve:
                 try:
-                    img_bytes = await super_resolve(img_bytes, mode=os.environ.get('POSTPROCESS_SR_MODE','hf'))
+                    sr_mode = meta.get('postprocess_sr_mode') or os.environ.get('POSTPROCESS_SR_MODE','hf')
+                    img_bytes = await super_resolve(img_bytes, mode=sr_mode)
                 except Exception as e:
                     print('SR failed for provider', item.get('provider'), str(e))
         except Exception:
@@ -620,6 +657,34 @@ async def generate_logo(req: GenerateLogoRequest):
             steps = req.steps or 40
             high_noise_frac = float(os.environ.get('LOCAL_HIGH_NOISE_FRAC', 0.8))
             img_bytes = await asyncio.to_thread(_generate_local_image_sync, req.prompt, steps, high_noise_frac, req.width, req.height, os.environ.get('LOCAL_DEVICE','cuda'))
+            # apply postprocess if requested in payload
+            try:
+                do_post_flag = req.postprocess if req.postprocess is not None else None
+                # call per-request postprocess with request-provided params (fallback to env inside helper)
+                if do_post_flag is None:
+                    # determine enabled state from env inside helper
+                    img_bytes = _postprocess_image_bytes(
+                        img_bytes,
+                        enabled=None,
+                        upscale=req.postprocess_upscale,
+                        unsharp_radius=req.postprocess_unsharp_radius,
+                        unsharp_percent=req.postprocess_unsharp_percent,
+                        unsharp_threshold=req.postprocess_unsharp_threshold,
+                        autocontrast=req.postprocess_autocontrast,
+                    )
+                else:
+                    img_bytes = _postprocess_image_bytes(
+                        img_bytes,
+                        enabled=bool(do_post_flag),
+                        upscale=req.postprocess_upscale,
+                        unsharp_radius=req.postprocess_unsharp_radius,
+                        unsharp_percent=req.postprocess_unsharp_percent,
+                        unsharp_threshold=req.postprocess_unsharp_threshold,
+                        autocontrast=req.postprocess_autocontrast,
+                    )
+            except Exception as e:
+                print('Local postprocess failed:', e)
+
             b64 = base64.b64encode(img_bytes).decode('utf-8')
             data_url = f'data:image/png;base64,{b64}'
             print('Returning image from local diffusers')
@@ -734,18 +799,43 @@ async def generate_logo(req: GenerateLogoRequest):
                     return data
 
                 img_bytes = r.content
-                # optional post-process
+                # inspect incoming request-level postprocess flags (fall back to env)
                 try:
-                    img_bytes = _postprocess_image_bytes(img_bytes)
-                except Exception:
-                    pass
+                    # per-request postprocess
+                    do_post_flag = getattr(req, 'postprocess', None)
+                    if do_post_flag is None:
+                        img_bytes = _postprocess_image_bytes(
+                            img_bytes,
+                            enabled=None,
+                            upscale=getattr(req, 'postprocess_upscale', None),
+                            unsharp_radius=getattr(req, 'postprocess_unsharp_radius', None),
+                            unsharp_percent=getattr(req, 'postprocess_unsharp_percent', None),
+                            unsharp_threshold=getattr(req, 'postprocess_unsharp_threshold', None),
+                            autocontrast=getattr(req, 'postprocess_autocontrast', None),
+                        )
+                    else:
+                        img_bytes = _postprocess_image_bytes(
+                            img_bytes,
+                            enabled=bool(do_post_flag),
+                            upscale=getattr(req, 'postprocess_upscale', None),
+                            unsharp_radius=getattr(req, 'postprocess_unsharp_radius', None),
+                            unsharp_percent=getattr(req, 'postprocess_unsharp_percent', None),
+                            unsharp_threshold=getattr(req, 'postprocess_unsharp_threshold', None),
+                            autocontrast=getattr(req, 'postprocess_autocontrast', None),
+                        )
+                except Exception as e:
+                    print('Postprocess failed:', e)
 
-                # optional super-resolution (POSTPROCESS_SR=1)
+                # optional super-resolution (request-level then env)
                 try:
-                    do_sr = os.environ.get('POSTPROCESS_SR', '0')
-                    if str(do_sr).lower() in ('1', 'true', 'yes') and super_resolve:
+                    do_sr = getattr(req, 'postprocess_sr', None)
+                    if do_sr is None:
+                        do_sr_env = os.environ.get('POSTPROCESS_SR', '0')
+                        do_sr = str(do_sr_env).lower() in ('1', 'true', 'yes')
+                    if do_sr and super_resolve:
                         try:
-                            img_bytes = await super_resolve(img_bytes, mode=os.environ.get('POSTPROCESS_SR_MODE','hf'))
+                            sr_mode = getattr(req, 'postprocess_sr_mode', None) or os.environ.get('POSTPROCESS_SR_MODE','hf')
+                            img_bytes = await super_resolve(img_bytes, mode=sr_mode)
                         except Exception as e:
                             print('Super-resolve failed:', e)
                 except Exception:
@@ -828,8 +918,80 @@ async def generate_card(req: GenerateLogoRequest):
     same HF inference code as `/generate/logo`. We keep a separate route so the
     backend can clearly request "card" images (not logos).
     """
-    # Reuse the existing generate_logo handler to avoid duplicating HF logic.
-    result = await generate_logo(req)
+    # Enforce card-specific defaults server-side in case the backend didn't
+    # attach them. This ensures card images are generated at sufficient
+    # resolution and with legibility-focused prompt hints and postprocess
+    # defaults.
+    def ensure_card_defaults(request: GenerateLogoRequest) -> GenerateLogoRequest:
+        # copy to avoid mutating caller's object
+        n = GenerateLogoRequest(
+            prompt=request.prompt,
+            style=getattr(request, 'style', None),
+            count=getattr(request, 'count', 1),
+            width=getattr(request, 'width', None),
+            height=getattr(request, 'height', None),
+            steps=getattr(request, 'steps', None),
+            guidance_scale=getattr(request, 'guidance_scale', None),
+            postprocess=getattr(request, 'postprocess', None),
+            postprocess_sr=getattr(request, 'postprocess_sr', None),
+            postprocess_upscale=getattr(request, 'postprocess_upscale', None),
+            postprocess_unsharp_radius=getattr(request, 'postprocess_unsharp_radius', None),
+            postprocess_unsharp_percent=getattr(request, 'postprocess_unsharp_percent', None),
+            postprocess_unsharp_threshold=getattr(request, 'postprocess_unsharp_threshold', None),
+            postprocess_autocontrast=getattr(request, 'postprocess_autocontrast', None),
+        )
+
+        # Enforce minimums
+        min_w = int(os.environ.get('CARD_MIN_WIDTH', 1024))
+        min_h = int(os.environ.get('CARD_MIN_HEIGHT', 640))
+        try:
+            w = int(n.width or min_w)
+            h = int(n.height or min_h)
+        except Exception:
+            w, h = min_w, min_h
+        if w < min_w or h < min_h:
+            scale_x = float(min_w) / float(w)
+            scale_y = float(min_h) / float(h)
+            scale = max(scale_x, scale_y)
+            w = int(math.ceil(w * scale))
+            h = int(math.ceil(h * scale))
+        n.width = w
+        n.height = h
+
+        # Append legibility hints if not present
+        leg_instr = (' High-resolution, sharp, legible sans-serif typography; large readable name and contact text; '
+                    'render any text exactly as provided; avoid random glyphs or distorted typography; '
+                    'flat vector-style logo placement; avoid metallic reflections or busy photoreal style.')
+        try:
+            if n.prompt and isinstance(n.prompt, str):
+                low = n.prompt.lower()
+                if 'legible' not in low and 'no random glyphs' not in low:
+                    n.prompt = n.prompt.strip() + ' ' + leg_instr
+            else:
+                n.prompt = 'Business card, clean, high-resolution, legible typography.' + leg_instr
+        except Exception:
+            n.prompt = (n.prompt or '') + ' Business card, legible text.' + leg_instr
+
+        # Default postprocess flags to enabled for cards
+        if n.postprocess is None:
+            n.postprocess = True
+        if n.postprocess_sr is None:
+            n.postprocess_sr = True
+        if n.postprocess_upscale is None:
+            n.postprocess_upscale = float(os.environ.get('POSTPROCESS_UPSCALE', 1.5))
+        if n.postprocess_unsharp_radius is None:
+            n.postprocess_unsharp_radius = float(os.environ.get('POSTPROCESS_UNSHARP_RADIUS', 1.0))
+        if n.postprocess_unsharp_percent is None:
+            n.postprocess_unsharp_percent = float(os.environ.get('POSTPROCESS_UNSHARP_PERCENT', 150.0))
+        if n.postprocess_unsharp_threshold is None:
+            n.postprocess_unsharp_threshold = int(os.environ.get('POSTPROCESS_UNSHARP_THRESHOLD', 3))
+        if n.postprocess_autocontrast is None:
+            n.postprocess_autocontrast = True
+
+        return n
+
+    enforced = ensure_card_defaults(req)
+    result = await generate_logo(enforced)
     # Normalize the source name for clarity
     if isinstance(result, dict):
         result.setdefault('source', 'hf_card')
@@ -1159,6 +1321,9 @@ class RefineLoopRequest(BaseModel):
     target_ocr_score: Optional[int] = 20
     max_iters: Optional[int] = 3
     init_imageBase64: Optional[str] = None
+    # allow per-request SR control for refine loops
+    postprocess_sr: Optional[bool] = None
+    postprocess_sr_mode: Optional[str] = None
 
 
 @app.post('/generate/refine-loop')
@@ -1194,6 +1359,39 @@ async def generate_refine_loop(req: RefineLoopRequest):
         return { 'detail': 'debug_error', 'error': str(debug_e), 'trace': tb }
     out_candidates = []
 
+    # If multi-provider returned no usable images (e.g., HF HTTPError produced error entries),
+    # attempt a Stability.ai fallback to ensure we have at least one image to refine.
+    try:
+        has_images = any(isinstance(it, dict) and it.get('images') for it in results)
+    except Exception:
+        has_images = False
+
+    if not has_images:
+        # If an init image was provided but providers failed, try a lightweight local text-boost and return it.
+        if req.init_imageBase64:
+            try:
+                print('No provider images, using init image with local text-boost fallback')
+                init_bytes = _decode_data_url(req.init_imageBase64) if req.init_imageBase64.startswith('data:') else base64.b64decode(req.init_imageBase64)
+                boosted = _local_text_boost(init_bytes)
+                data_url = 'data:image/png;base64,' + base64.b64encode(boosted).decode('utf-8')
+                return { 'candidates': [{ 'provider': 'init_boost', 'result_image': data_url, 'final_ocr_len': 0 }] }
+            except Exception as e:
+                print('Init image boost failed:', e)
+
+        # Try Stability fallback if available
+        try:
+            if generate_stability_image:
+                print('No images from HF/local; attempting Stability.ai fallback inside refine-loop')
+                sreq = StabilityRequest(prompt=req.prompt, width=req.width or 512, height=req.height or 512, steps=req.steps or 20)
+                stab = await generate_stability(sreq)
+                # normalize into expected results list
+                if isinstance(stab, dict) and stab.get('images'):
+                    results = [{ 'provider': 'stability', 'images': stab.get('images') }]
+                else:
+                    print('Stability fallback returned no images:', stab)
+        except Exception as se:
+            print('Stability fallback inside refine-loop failed:', se)
+
     for item in results:
         candidate_log = { 'provider': item.get('provider') if isinstance(item, dict) else 'unknown', 'attempts': [] }
         # decode image bytes
@@ -1216,12 +1414,16 @@ async def generate_refine_loop(req: RefineLoopRequest):
         achieved_score = 0
         for itr in range(int(req.max_iters or 1)):
             step_log = { 'iteration': itr+1 }
-            # optional SR
+            # optional SR (use per-request flags if provided)
             try:
-                do_sr = os.environ.get('POSTPROCESS_SR', '0')
-                if str(do_sr).lower() in ('1', 'true', 'yes') and super_resolve:
+                do_sr = req.postprocess_sr if getattr(req, 'postprocess_sr', None) is not None else None
+                if do_sr is None:
+                    do_sr_env = os.environ.get('POSTPROCESS_SR', '0')
+                    do_sr = str(do_sr_env).lower() in ('1', 'true', 'yes')
+                if do_sr and super_resolve:
                     try:
-                        cur_bytes = await super_resolve(cur_bytes, mode=os.environ.get('POSTPROCESS_SR_MODE','hf'))
+                        sr_mode = req.postprocess_sr_mode or os.environ.get('POSTPROCESS_SR_MODE','hf')
+                        cur_bytes = await super_resolve(cur_bytes, mode=sr_mode)
                         step_log['sr'] = 'applied'
                     except Exception as e:
                         step_log['sr_error'] = str(e)
@@ -1311,4 +1513,20 @@ async def generate_refine_loop(req: RefineLoopRequest):
         candidate_log['result_image'] = 'data:image/png;base64,' + base64.b64encode(final_bytes).decode('utf-8')
         out_candidates.append(candidate_log)
 
-    return { 'candidates': out_candidates }
+    # Normalize output: include a top-level 'images' list (data-urls) for callers that expect it.
+    images = []
+    try:
+        for c in out_candidates:
+            if isinstance(c, dict) and c.get('result_image'):
+                images.append(c.get('result_image'))
+            elif isinstance(c, dict) and c.get('images') and isinstance(c.get('images'), list) and c.get('images')[0]:
+                images.append(c.get('images')[0])
+    except Exception:
+        images = []
+
+    out = { 'candidates': out_candidates }
+    if images:
+        out['images'] = images
+        # also include a convenience 'best' pointing to first image
+        out['best'] = images[0]
+    return out
