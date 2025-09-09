@@ -1,9 +1,12 @@
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import { fileURLToPath } from 'url'
 
-// cache directory (backend/cache)
-const CACHE_DIR = path.resolve(new URL(import.meta.url).pathname, '..', 'cache')
+// cache directory (backend/services/cache) - resolve reliably on Windows and POSIX
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const CACHE_DIR = path.join(__dirname, 'cache')
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true })
 
 export function saveBase64Image(dataUrl) {

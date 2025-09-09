@@ -1,6 +1,6 @@
 import express from 'express'
 import fetch from 'node-fetch'
-import { forwardToPython } from '../services/pythonProxy.js'
+import { forwardToPython, isPythonConfigured } from '../services/pythonProxy.js'
 import { getAndClearLastLogo } from '../services/logoStore.js'
 import { generateCardDesign, generateCardImage, generateCardSVG } from '../services/aiService.js'
 import overlayTextOnImage from '../services/imageTextRenderer.js'
@@ -109,8 +109,7 @@ router.post('/generate-card-image', async (req, res) => {
     // If a Python ML service is configured, proxy the request and request both
     // Stability (platform) and the existing generate/logo endpoint so the frontend
     // can show both outputs for comparison.
-    const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
-    if (PY_ML_URL) {
+    if (isPythonConfigured()) {
         try {
     const width = (size && size.width) || 1050
     const height = (size && size.height) || 600

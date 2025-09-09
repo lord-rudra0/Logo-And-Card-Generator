@@ -1,19 +1,18 @@
 import fetch from 'node-fetch'
 
-const PY_ML_URL = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
+export function isPythonConfigured() {
+  return Boolean(process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL)
+}
 
 const LOGO_NEGATIVE_PROMPT = 'no people, no faces, no hands, no photographic scenes, no stock photos, no watermarks, no signatures, no unrelated text overlays, avoid realistic backgrounds; produce clean vector-like artwork suitable for logos.'
 const CARD_NEGATIVE_PROMPT = 'no people, no faces, no animals, no photographs, no busy scenes, no unrelated props, no watermarks, no logos of other brands, no text artifacts, no distorted or unreadable typography, no OCR-like characters, avoid overly complex photographic backgrounds; produce a clean, flat, print-ready card mockup or vector-friendly layout with sharp, legible text and correct margins.'
 
-if (!PY_ML_URL) {
-  console.warn('Python ML service not configured (pythonProxy will throw if used)')
-}
-
 // Forward payload to python ML endpoint at `path` (relative) while appending a negative_prompt.
 // If payload already contains negative_prompt, append the defaults (separated by comma) instead of overwriting.
 export async function forwardToPython(path, payload = {}, options = {}) {
-  if (!PY_ML_URL) throw new Error('Python ML service not configured')
-  const url = `${PY_ML_URL.replace(/\/$/, '')}/${path.replace(/^\//, '')}`
+  const baseUrl = process.env.PY_IMAGE_SERVICE_URL || process.env.ML_BASE_URL || null
+  if (!baseUrl) throw new Error('Python ML service not configured')
+  const url = `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`
   const headers = { 'Content-Type': 'application/json' }
   const requestId = (options && options.requestId) || (options.req && options.req.requestId) || null
   if (requestId) headers['X-Request-Id'] = requestId

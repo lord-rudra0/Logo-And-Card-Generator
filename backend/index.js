@@ -23,9 +23,10 @@ app.use(express.json())
 // serve cached generated images (store is under backend/services/cache)
 import path from 'path'
 import fs from 'fs'
-// Resolve cache directory relative to this file so serving works regardless of
-// the working directory used to start the process.
-const __dirname = path.dirname(new URL(import.meta.url).pathname)
+import { fileURLToPath } from 'url'
+// Resolve directories relative to this file (Windows-safe)
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 const CACHE_SERVE_DIR = path.join(__dirname, 'services', 'cache')
 app.use('/cache', express.static(CACHE_SERVE_DIR))
 // serve stored logos
