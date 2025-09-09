@@ -43,6 +43,86 @@ npm run dev
 ```
 Server listens on `http://localhost:${PORT}`.
 
+## ML service (python) — venv and env loading
+
+This repo includes a small FastAPI ML microservice under `ml/` used for image generation and helpers. The recommended way to run it is inside a Python virtual environment and load `ml/.env` for environment variables.
+
+1) Create and activate a venv (Linux/macOS):
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r ml/requirements.txt
+```
+
+2) Create or verify `ml/.env` has the tokens and flags you need. Example important vars:
+- `HUGGINGFACE_API_TOKEN` or `HF_TOKEN` — required for HuggingFace inference API
+- `STABILITY_API_KEY` — optional Stability.ai key
+- `USE_LOCAL_DIFFUSION` — set to `1` to enable local diffusers models, `0` (default) to use remote APIs
+- `LOCAL_DEVICE` — if using local models, set `cpu` or `cuda` (if you have GPU)
+
+3) Load environment from `ml/.env` and run the service (Linux/macOS):
+```bash
+# from repo root
+source ml/.env && uvicorn ml.server:app --host 127.0.0.1 --port 8001
+```
+
+Platform-specific run commands
+
+- Windows (no GPU) — recommended: keep `USE_LOCAL_DIFFUSION=0` to use remote APIs. Use PowerShell to set env and run:
+```powershell
+# create venv and install (one-time)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r ml/requirements.txt
+
+# ensure ml/.env contains HUGGINGFACE_API_TOKEN or STABILITY_API_KEY and USE_LOCAL_DIFFUSION=0
+# run server
+set -p HUGGINGFACE_API_TOKEN=$env:HUGGINGFACE_API_TOKEN
+# or load ml/.env manually, then:
+uvicorn ml.server:app --host 127.0.0.1 --port 8001
+```
+
+- Windows (with GPU) — install CUDA-enabled PyTorch and enable local diffusers. Example steps (adjust CUDA version):
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+# Install CUDA-enabled PyTorch following https://pytorch.org instructions for your CUDA
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -r ml/requirements.txt
+# set ml/.env: USE_LOCAL_DIFFUSION=1 and LOCAL_DEVICE=cuda
+uvicorn ml.server:app --host 127.0.0.1 --port 8001
+```
+
+- Linux (no GPU) — remote APIs (recommended):
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r ml/requirements.txt
+# ensure ml/.env has HUGGINGFACE_API_TOKEN and USE_LOCAL_DIFFUSION=0
+source ml/.env && uvicorn ml.server:app --host 127.0.0.1 --port 8001
+```
+
+- Linux (with GPU) — install CUDA PyTorch and run local models:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+# follow https://pytorch.org to pick the correct CUDA wheel, e.g.:
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -r ml/requirements.txt
+# set ml/.env: USE_LOCAL_DIFFUSION=1 and LOCAL_DEVICE=cuda
+source ml/.env && uvicorn ml.server:app --host 127.0.0.1 --port 8001
+```
+
+Notes and caveats
+- If you keep `USE_LOCAL_DIFFUSION=0` you do not need an NVIDIA GPU and you do not need to modify code. The service will call hosted HF/Stability APIs.
+- If you enable `USE_LOCAL_DIFFUSION=1` and set `LOCAL_DEVICE=cpu`, the code in `ml/server.py` currently loads pipelines with `torch_dtype=torch.float16` and `variant='fp16'`. Running fp16 on CPU will fail — you must change the loader to use float32 on CPU. Local CPU inference for large models can be extremely slow and memory-intensive.
+- For OCR endpoints install Tesseract binary (Windows: Chocolatey `choco install tesseract`, Linux: `apt install tesseract-ocr`).
+
 ## How to use
 
 Quick start (backend)
